@@ -1,0 +1,217 @@
+name: Monitor
+
+on:
+  schedule:
+    # 09:00 IST and 21:00 IST (IST = UTC+5:30)
+    - cron: '30 3 * * *'
+    - cron: '30 15 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Only check the first N domains (testing)'
+        required: false
+        type: string
+      domains:
+        description: 'Comma-separated list of specific domains'
+        required: false
+        type: string
+      skip_screenshots:
+        description: 'Skip screenshot capture'
+        required: false
+        type: boolean
+        default: false
+
+# Never run two monitoring cycles at once; a new trigger waits for the old one.
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SHEET_ID: ${{ secrets.SHEET_ID }}
+  GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+  PAGES_BASE_URL: ${{ secrets.PAGES_BASE_URL }}
+
+jobs:
+  prepare:
+    name: Prepare shard matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      shard_count: ${{ steps.matrix.outputs.shard_count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @uptime/shared build
+          pnpm --filter @uptime/gsheets build
+          pnpm --filter @uptime/monitor build
+
+      - name: Compute shard matrix
+        id: matrix
+        run: |
+          node monitor/dist/index.js --plan \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
+            ${{ inputs.domains && format('--domains {0}', inputs.domains) || '' }} \
+            > plan.json
+          cat plan.json
+          echo "matrix=$(node -p 'JSON.stringify(JSON.parse(require("fs").readFileSync("plan.json","utf8")).matrix)')" >> "$GITHUB_OUTPUT"
+          echo "shard_count=$(node -p 'JSON.parse(require("fs").readFileSync("plan.json","utf8")).shardCount')" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: Check shard ${{ matrix.shard }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @uptime/shared build
+          pnpm --filter @uptime/gsheets build
+          pnpm --filter @uptime/monitor build
+
+      - name: Install Playwright chromium
+        if: ${{ inputs.skip_screenshots != true }}
+        run: pnpm --filter @uptime/monitor exec playwright install --with-deps chromium
+
+      - name: Fetch previous state
+        continue-on-error: true
+        run: |
+          mkdir -p monitor/state
+          curl -fsSL --max-time 20 "$PAGES_BASE_URL/cache/state.json" -o monitor/state/state.json || echo 'no previous state'
+
+      - name: Run monitoring shard
+        run: |
+          node monitor/dist/index.js \
+            --shard ${{ matrix.shard }} \
+            --shard-count ${{ needs.prepare.outputs.shard_count }} \
+            --output monitor/output \
+            ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
+            ${{ inputs.domains && format('--domains {0}', inputs.domains) || '' }} \
+            ${{ inputs.skip_screenshots == true && '--skip-screenshots' || '' }}
+
+      - name: Upload shard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}
+          path: monitor/output
+          retention-days: 3
+          if-no-files-found: error
+
+  aggregate:
+    name: Aggregate, update sheet, publish storage
+    needs: [prepare, check]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @uptime/shared build
+          pnpm --filter @uptime/gsheets build
+          pnpm --filter @uptime/monitor build
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-*
+          path: shards
+
+      - name: Checkout storage repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/${{ vars.STORAGE_REPO }}
+          token: ${{ secrets.STORAGE_REPO_PAT }}
+          path: storage
+
+      - name: Fetch previous state
+        continue-on-error: true
+        run: |
+          mkdir -p monitor/state
+          cp storage/cache/state.json monitor/state/state.json 2>/dev/null || echo 'no previous state'
+
+      - name: Aggregate results
+        run: |
+          node monitor/dist/index.js --aggregate \
+            --input shards \
+            --storage-dir storage \
+            --run-id "${{ github.run_id }}"
+
+      - name: Commit and push storage
+        working-directory: storage
+        run: |
+          git config user.name 'uptime-monitor[bot]'
+          git config user.email 'uptime-monitor@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No storage changes.'
+            exit 0
+          fi
+          git commit -m "monitor: run ${{ github.run_id }} ($(date -u +%Y-%m-%dT%H:%MZ))"
+          # Rebase-retry push: another workflow may have pushed meanwhile.
+          for i in 1 2 3; do
+            git push && break
+            git pull --rebase && sleep $((i * 5))
+          done
+
+      - name: Write run summary
+        if: always()
+        run: |
+          if [ -f storage/cache/summary.json ]; then
+            node -e '
+              const s = JSON.parse(require("fs").readFileSync("storage/cache/summary.json", "utf8"));
+              const md = [
+                "## Monitoring run " + s.runId,
+                "",
+                "| Metric | Value |",
+                "| --- | --- |",
+                "| Total domains | " + s.totalDomains + " |",
+                "| Up | " + s.up + " |",
+                "| Down | " + s.down + " |",
+                "| Degraded | " + s.degraded + " |",
+                "| SSL expiring soon | " + s.sslExpiringSoon + " |",
+                "| Avg response | " + s.avgResponseTimeMs + " ms |",
+                "| Screenshots | " + s.screenshotsCaptured + " ok / " + s.screenshotsFailed + " failed |",
+                "| Incidents opened | " + s.incidentsOpened + " |",
+              ].join("\n");
+              require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
+            '
+          else
+            echo "No summary produced." >> "$GITHUB_STEP_SUMMARY"
+          fi

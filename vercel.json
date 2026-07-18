@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "corepack enable && pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @uptime/shared build && pnpm --filter frontend build",
+  "outputDirectory": "frontend/.next",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- frontend packages/shared"
+}

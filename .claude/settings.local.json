@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"/d/Website uptime Checker\" status)",
+      "Bash(pnpm --filter @uptime/shared build)",
+      "Bash(pnpm --filter @uptime/shared test)",
+      "Bash(pnpm --filter @uptime/gsheets build)",
+      "Bash(ls \"/tmp\")",
+      "Read(//tmp/**)",
+      "Bash(ls -d \"D:\\\\\\\\Website uptime Checker\")",
+      "Read(//d//**)",
+      "Bash(cd \"D:\\\\\\\\Website uptime Checker\")",
+      "Bash(cd \"D:\\\\\\\\Website uptime Checker\\\\\\\\packages\")",
+      "Bash(pnpm --version)",
+      "Bash(ls /tmp)",
+      "Bash(ls -la /mnt)",
+      "Bash(ls -la \"D:\\\\\\\\Website uptime Checker\")",
+      "Bash(corepack pnpm *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm --filter @uptime/gsheets test)"
+    ]
+  }
+}

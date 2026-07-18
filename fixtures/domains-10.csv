@@ -1,0 +1,11 @@
+Company,Project,Owner,Department,Website,Tags,Category
+Acme Corp,Main Site,alice,Marketing,https://example.com,demo,Corporate
+Acme Corp,Docs,bob,Engineering,https://developer.mozilla.org,demo,Docs
+Acme Corp,Blog,carol,Marketing,https://wordpress.org,"demo,wordpress",Blog
+Acme Corp,Status,dave,SRE,https://www.cloudflarestatus.com,demo,Status
+Acme Corp,Search,alice,Product,https://duckduckgo.com,demo,Product
+Acme Corp,Repo,bob,Engineering,https://github.com,demo,Tools
+Acme Corp,Expired SSL Test,carol,QA,https://expired.badssl.com,"demo,negative-test",QA
+Acme Corp,Missing Host Test,dave,QA,https://this-domain-does-not-exist-xyzq.com,"demo,negative-test",QA
+Acme Corp,News,alice,Marketing,https://news.ycombinator.com,demo,News
+Acme Corp,CDN Site,bob,Engineering,https://www.cloudflare.com,"demo,cloudflare",Corporate

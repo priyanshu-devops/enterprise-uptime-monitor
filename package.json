@@ -1,0 +1,31 @@
+{
+  "name": "uptime-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise Website Monitoring Platform — monitors 350-1000+ domains on free-tier infrastructure",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r --filter '!frontend' build && pnpm --filter frontend build",
+    "build:shared": "pnpm --filter @uptime/shared build",
+    "build:monitor": "pnpm --filter @uptime/shared build && pnpm --filter @uptime/monitor build",
+    "build:backend": "pnpm --filter @uptime/shared build && pnpm --filter @uptime/backend build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "monitor": "pnpm --filter @uptime/monitor start",
+    "dev:backend": "pnpm --filter @uptime/backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "setup:sheet": "tsx scripts/setup-sheet.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "local-run": "tsx scripts/local-run.ts"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

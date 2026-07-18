@@ -1,0 +1,69 @@
+name: Maintenance
+
+on:
+  schedule:
+    # Weekly, Sunday 20:04 UTC — squash storage-repo history and prune old files.
+    - cron: '4 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      skip_squash:
+        description: 'Skip git history squash'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  maintain-storage:
+    name: Prune and squash storage repo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout storage repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/${{ vars.STORAGE_REPO }}
+          token: ${{ secrets.STORAGE_REPO_PAT }}
+          path: storage
+          fetch-depth: 0
+
+      - name: Prune old logs and reports
+        working-directory: storage
+        run: |
+          # Monitor logs older than 30 days
+          find logs/monitor -type f -name '*.jsonl' -mtime +30 -delete 2>/dev/null || true
+          # Daily reports older than 90 days
+          find reports/daily -mindepth 1 -maxdepth 1 -type d -mtime +90 -exec rm -rf {} + 2>/dev/null || true
+          # History JSON older than 400 days
+          find cache/history -type f -name '*.json' -mtime +400 -delete 2>/dev/null || true
+          git config user.name 'uptime-monitor[bot]'
+          git config user.email 'uptime-monitor@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet || git commit -m 'maintenance: prune old logs and reports'
+
+      - name: Squash history
+        if: ${{ inputs.skip_squash != true }}
+        working-directory: storage
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/squash-history.sh"
+
+      - name: Push
+        working-directory: storage
+        run: |
+          git push --force origin main
+
+      - name: Report repo size
+        working-directory: storage
+        run: |
+          echo "## Storage repo maintenance" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Working tree size: $(du -sh --exclude=.git . | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Git dir size after squash: $(du -sh .git | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Files: $(git ls-files | wc -l)" >> "$GITHUB_STEP_SUMMARY"

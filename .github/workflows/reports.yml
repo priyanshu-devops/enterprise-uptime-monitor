@@ -1,0 +1,74 @@
+name: Reports
+
+on:
+  schedule:
+    # Daily at 16:07 UTC (after the 15:30 UTC evening monitoring run finishes).
+    - cron: '7 16 * * *'
+  workflow_dispatch:
+    inputs:
+      period:
+        description: 'Report period to generate'
+        required: false
+        type: choice
+        options: [daily, weekly, monthly, quarterly]
+        default: daily
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @uptime/shared build
+          pnpm --filter @uptime/gsheets build
+          pnpm --filter @uptime/monitor build
+
+      - name: Checkout storage repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/${{ vars.STORAGE_REPO }}
+          token: ${{ secrets.STORAGE_REPO_PAT }}
+          path: storage
+
+      - name: Generate reports
+        run: |
+          # Daily always; weekly on Mondays; monthly on the 1st; quarterly on Jan/Apr/Jul/Oct 1st.
+          # workflow_dispatch can force a specific period.
+          node monitor/dist/index.js --reports \
+            --storage-dir storage \
+            ${{ inputs.period && format('--period {0}', inputs.period) || '--period auto' }}
+
+      - name: Commit and push
+        working-directory: storage
+        run: |
+          git config user.name 'uptime-monitor[bot]'
+          git config user.email 'uptime-monitor@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No report changes.'
+            exit 0
+          fi
+          git commit -m "reports: $(date -u +%Y-%m-%d)"
+          for i in 1 2 3; do
+            git push && break
+            git pull --rebase && sleep $((i * 5))
+          done
