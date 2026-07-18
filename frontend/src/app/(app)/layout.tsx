@@ -19,13 +19,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
-    // Zustand persist hydrates synchronously on the client, but guard for the
-    // first paint to avoid a redirect flash before hydration completes.
-    if (token === null) {
-      router.replace('/login');
-      return;
+    const unsub = useAuthStore.persist.onFinishHydration(() => setReady(true));
+    const isHydrated = useAuthStore.persist.hasHydrated();
+    
+    if (isHydrated) {
+      if (token === null) {
+        router.replace('/login');
+      } else {
+        setReady(true);
+      }
     }
-    setReady(true);
+
+    return () => {
+      unsub();
+    };
   }, [token, router]);
 
   if (!ready) {
