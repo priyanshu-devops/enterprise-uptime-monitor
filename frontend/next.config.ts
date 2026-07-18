@@ -1,5 +1,7 @@
 import type { NextConfig } from 'next';
 
+// Trigger Vercel Build
+
 const nextConfig: NextConfig = {
   transpilePackages: ['@uptime/shared'],
   images: {
