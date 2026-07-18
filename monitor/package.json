@@ -1,0 +1,33 @@
+{
+  "name": "@uptime/monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "uptime-monitor": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@uptime/gsheets": "workspace:*",
+    "@uptime/shared": "workspace:*",
+    "node-html-parser": "^6.1.13",
+    "p-limit": "^6.1.0",
+    "playwright": "^1.49.1",
+    "sharp": "^0.33.5",
+    "tldts": "^6.1.71",
+    "undici": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

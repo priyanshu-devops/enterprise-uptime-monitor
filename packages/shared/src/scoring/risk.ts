@@ -53,7 +53,7 @@ export function computeRiskScore(result: CheckResult, state?: DomainState): Risk
   }
 
   // Flapping: 2+ failures in the trailing window
-  if (state) {
+  if (state && Array.isArray(state.recentStatuses)) {
     const failures = state.recentStatuses.filter((s) =>
       ['DOWN', 'TIMEOUT', 'DNS_FAILURE', 'ERROR', 'SSL_ERROR'].includes(s),
     ).length;
