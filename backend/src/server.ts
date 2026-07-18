@@ -30,8 +30,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pino from 'pino';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pinoHttp = require('pino-http') as (opts: object) => import('express').RequestHandler;
+import pinoHttp from 'pino-http';
 
 import { authRouter } from './routes/auth.js';
 import { domainsRouter } from './routes/domains.js';
@@ -61,7 +60,8 @@ const app: import('express').Express = express();
 app.set('trust proxy', 1);
 
 // Request logging
-app.use(pinoHttp({ logger }));
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+app.use((pinoHttp as any)({ logger }));
 
 // Security headers
 app.use(helmet({
