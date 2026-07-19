@@ -15,7 +15,7 @@ import type {
 import { useAuthStore } from '@/lib/stores/auth';
 import { useConnectionStore } from '@/lib/stores/connection';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 const PAGES_BASE = process.env.NEXT_PUBLIC_PAGES_BASE_URL ?? '';
 const TIMEOUT_MS = 4000;
 
