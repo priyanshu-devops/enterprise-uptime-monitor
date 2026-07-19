@@ -34,3 +34,4 @@ Thumbs.db
 .claude/
 .gemini/
 
+backend/.env

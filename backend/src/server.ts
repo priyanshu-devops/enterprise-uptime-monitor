@@ -183,7 +183,7 @@ app.use((_req, res) => {
 // Global error handler
 app.use(errorHandler);
 
-const PORT = Number(process.env.PORT) || 8080;
+const PORT = Number(process.env.PORT) || 4000;
 
 const server = app.listen(PORT, () => {
   logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'Backend API started');

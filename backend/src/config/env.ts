@@ -9,7 +9,7 @@ import { z } from 'zod';
 /** Schema for all environment variables the backend reads. */
 const envSchema = z
   .object({
-    PORT: z.coerce.number().int().min(1).max(65535).default(8080),
+    PORT: z.coerce.number().int().min(1).max(65535).default(4000),
     NODE_ENV: z.string().default('development'),
     LOG_LEVEL: z.string().default('info'),
     /** When "1", boot with in-memory fakes (no Google Sheet / GitHub needed). */

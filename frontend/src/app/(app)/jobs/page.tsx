@@ -128,11 +128,11 @@ export default function JobsPage() {
 }
 
 function JobRow({ job }: { job: JobRun }) {
-  const { icon: Icon, className, label } = runVisual(job);
+  const { icon: Icon, className, spin, label } = runVisual(job);
   return (
     <div className="flex items-center justify-between gap-3 py-3">
       <div className="flex min-w-0 items-center gap-3">
-        <Icon className={cn('h-5 w-5 shrink-0', className)} />
+        <Icon className={cn('h-5 w-5 shrink-0', className, spin && 'animate-spin')} />
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{job.name || `Run #${job.id}`}</p>
           <p className="text-2xs text-muted-foreground">
@@ -162,11 +162,12 @@ function JobRow({ job }: { job: JobRun }) {
 function runVisual(job: JobRun): {
   icon: React.ComponentType<{ className?: string }>;
   className: string;
+  spin: boolean;
   label: string;
 } {
-  if (job.status === 'in_progress') return { icon: Loader2, className: 'text-primary animate-spin', label: 'Running' };
-  if (job.status === 'queued') return { icon: Clock, className: 'text-muted-foreground', label: 'Queued' };
-  if (job.conclusion === 'success') return { icon: CheckCircle2, className: 'text-success', label: 'Success' };
-  if (job.conclusion === 'failure') return { icon: XCircle, className: 'text-destructive', label: 'Failed' };
-  return { icon: Clock, className: 'text-muted-foreground', label: job.conclusion ?? 'Completed' };
+  if (job.status === 'in_progress') return { icon: Loader2, className: 'text-primary', spin: true, label: 'Running' };
+  if (job.status === 'queued') return { icon: Clock, className: 'text-muted-foreground', spin: false, label: 'Queued' };
+  if (job.conclusion === 'success') return { icon: CheckCircle2, className: 'text-success', spin: false, label: 'Success' };
+  if (job.conclusion === 'failure') return { icon: XCircle, className: 'text-destructive', spin: false, label: 'Failed' };
+  return { icon: Clock, className: 'text-muted-foreground', spin: false, label: job.conclusion ?? 'Completed' };
 }

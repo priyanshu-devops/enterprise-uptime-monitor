@@ -1,0 +1,36 @@
+# Render.com Blueprint for the backend API service.
+# Deploy from the monorepo root; Render runs the buildCommand then startCommand.
+#
+# Required environment variables (set in Render dashboard or via envVarGroups):
+#   ADMIN_EMAIL, ADMIN_PASSWORD_HASH, JWT_SECRET
+#   GOOGLE_SERVICE_ACCOUNT_JSON_B64, SHEET_ID
+#   GITHUB_TOKEN, GITHUB_OWNER, CODE_REPO, STORAGE_REPO, PAGES_BASE_URL
+#   FRONTEND_ORIGIN (your Vercel frontend URL for CORS)
+
+services:
+  - type: web
+    name: uptime-backend
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: .
+    buildCommand: |
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @uptime/shared build &&
+      pnpm --filter @uptime/gsheets build &&
+      pnpm --filter @uptime/backend build
+    startCommand: node backend/dist/server.js
+    healthCheckPath: /api/v1/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: NODE_VERSION
+        value: 22
+      # The following must be set in the Render dashboard (Secrets):
+      # ADMIN_EMAIL, ADMIN_PASSWORD_HASH, JWT_SECRET
+      # GOOGLE_SERVICE_ACCOUNT_JSON_B64, SHEET_ID
+      # GITHUB_TOKEN, GITHUB_OWNER, CODE_REPO, STORAGE_REPO, PAGES_BASE_URL
+      # FRONTEN
