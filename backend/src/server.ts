@@ -25,6 +25,12 @@
  */
 
 import 'node:process';
+
+// Must be the FIRST local import: loads the repo `.env` into process.env
+// before any other module evaluates. (ESM evaluates imported modules in order,
+// before the importing module's body runs.)
+import './bootstrap-env.js';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
