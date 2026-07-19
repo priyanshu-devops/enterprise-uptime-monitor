@@ -11,6 +11,8 @@ export interface DnsResult {
   nameservers: string[];
   /** Records present, e.g. "A,AAAA,MX,TXT". */
   summary: string;
+  /** True when resolution failed due to resolver/network error (not NXDOMAIN). */
+  resolverError?: boolean;
   error?: string;
 }
 

@@ -10,7 +10,7 @@ import type { CheckResult, DomainState, StateFile } from '@uptime/shared';
 import type { MonitorConfig } from '../config.js';
 import type { Logger } from '../logging.js';
 import { runDomain, type CheckInput } from './runner.js';
-import { GlobalBreaker } from './circuitBreaker.js';
+import { GlobalBreaker, isInfraFailure } from './circuitBreaker.js';
 import { ScreenshotEngine } from '../screenshot/engine.js';
 
 /** Outcome of running one shard. */
@@ -68,11 +68,11 @@ export async function runShard(
           engineProxy as ScreenshotEngine | undefined,
         );
         results.push(result);
-        breaker.record(result.status);
+        breaker.record(isInfraFailure(result));
         if (breaker.shouldAbort() && !aborted) {
           aborted = true;
           logger.error('Global circuit breaker tripped — aborting shard', {
-            ratio: Number(breaker.ratio().toFixed(2)),
+            infraFailureRatio: Number(breaker.ratio().toFixed(2)),
             checked: results.length,
           });
         }

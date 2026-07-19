@@ -153,6 +153,20 @@ jobs:
           pattern: shard-*
           path: shards
 
+      - name: Validate storage configuration
+        run: |
+          if [ -z "${{ vars.STORAGE_REPO }}" ]; then
+            echo "::error::Repository variable STORAGE_REPO is not set. Set it under" \
+                 "Settings → Secrets and variables → Actions → Variables to the" \
+                 "storage repo name (just the repo, e.g. 'uptime-storage')."
+            exit 1
+          fi
+          if [ -z "${{ secrets.STORAGE_REPO_PAT }}" ]; then
+            echo "::error::Secret STORAGE_REPO_PAT is not set. Add a fine-grained PAT" \
+                 "with contents:write on the storage repo."
+            exit 1
+          fi
+
       - name: Checkout storage repo
         uses: actions/checkout@v4
         with:

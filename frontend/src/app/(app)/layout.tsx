@@ -15,27 +15,34 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
-  const [ready, setReady] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Track when the persisted auth store has finished rehydrating from
+  // localStorage. This is separate from the redirect decision on purpose:
+  // reading `token` from the render closure during hydration can observe the
+  // pre-hydration `null` even after `hasHydrated()` flips true (sync storage),
+  // which would falsely log an authenticated user out on refresh.
   useEffect(() => {
-    const unsub = useAuthStore.persist.onFinishHydration(() => setReady(true));
-    const isHydrated = useAuthStore.persist.hasHydrated();
-    
-    if (isHydrated) {
-      if (token === null) {
-        router.replace('/login');
-      } else {
-        setReady(true);
-      }
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
     }
+    const unsub = useAuthStore.persist.onFinishHydration(() => setHydrated(true));
+    return () => unsub();
+  }, []);
 
-    return () => {
-      unsub();
-    };
-  }, [token, router]);
+  // Only decide on the redirect once hydration is confirmed, and read the
+  // token authoritatively from the store (not the possibly-stale closure).
+  useEffect(() => {
+    if (hydrated && useAuthStore.getState().token === null) {
+      router.replace('/login');
+    }
+  }, [hydrated, token, router]);
 
-  if (!ready) {
+  // Block rendering until hydration completes, and while an unauthenticated
+  // redirect is in flight, so protected content never flashes.
+  if (!hydrated || token === null) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
