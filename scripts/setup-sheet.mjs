@@ -1,11 +1,13 @@
 /**
- * One-time setup: creates all required tabs in the target spreadsheet and
- * writes header rows with basic formatting.
+ * One-time sheet setup — plain-Node runner.
  *
- * Usage:
- *   SHEET_ID=... GOOGLE_SERVICE_ACCOUNT_JSON_B64=... pnpm setup:sheet
+ * Mirrors scripts/setup-sheet.ts but imports the compiled dist directly so it
+ * runs under `node` without tsx's workspace-exports resolution quirk. Creates
+ * every required tab and writes header rows into the target spreadsheet.
+ *
+ * Usage: node scripts/setup-sheet.mjs   (reads .env from repo root)
  */
-import { SheetsClient } from '@uptime/gsheets';
+import { SheetsClient } from '../packages/gsheets/dist/index.js';
 import {
   AUDIT_HEADERS,
   HEADER_ROW,
@@ -13,21 +15,19 @@ import {
   INCIDENT_HEADERS,
   LAST_COLUMN_LETTER,
   SHEET_TABS,
-} from '@uptime/shared';
+} from '../packages/shared/dist/index.js';
 
-// Load .env from the repo root when present (no-op in CI, where the workflow
-// injects these as real environment variables).
 try {
   process.loadEnvFile(new URL('../.env', import.meta.url));
 } catch {
-  // No .env file — rely on the ambient environment.
+  // No .env — rely on ambient environment.
 }
 
-async function main(): Promise<void> {
+async function main() {
   const spreadsheetId = process.env.SHEET_ID;
   const serviceAccountJsonB64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64;
   if (!spreadsheetId || !serviceAccountJsonB64) {
-    console.error('Missing SHEET_ID or GOOGLE_SERVICE_ACCOUNT_JSON_B64 environment variables.');
+    console.error('Missing SHEET_ID or GOOGLE_SERVICE_ACCOUNT_JSON_B64.');
     process.exit(1);
   }
 
@@ -59,6 +59,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('setup-sheet failed:', err);
+  console.error('setup-sheet failed:', err?.message ?? err);
   process.exit(1);
 });
