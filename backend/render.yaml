@@ -15,7 +15,7 @@ services:
     plan: free
     rootDir: .
     buildCommand: |
-      corepack enable &&
+      npm install -g pnpm &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @uptime/shared build &&
       pnpm --filter @uptime/gsheets build &&
