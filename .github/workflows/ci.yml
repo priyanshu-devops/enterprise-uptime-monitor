@@ -33,6 +33,8 @@ jobs:
       - name: Build shared packages
         run: |
           pnpm --filter @uptime/shared build
+          pnpm --filter @uptime/database build
+          pnpm --filter @uptime/supabase build
           pnpm --filter @uptime/gsheets build
 
       - name: Build monitor
