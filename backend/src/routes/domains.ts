@@ -12,7 +12,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { asyncHandler, ApiError } from '../middleware/errorHandler.js';
 import { cacheMiddleware } from '../middleware/cache.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 import type { AuthRequest } from '../middleware/auth.js';
 
 // ── Zod schemas ──────────────────────────────────────────────────────────────
@@ -52,8 +52,8 @@ const bulkSchema = z.object({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 function actor(req: AuthRequest): string {
@@ -72,7 +72,7 @@ domainsRouter.get(
     if (!parsed.success) throw ApiError.badRequest('Invalid query parameters');
 
     const svc = getService(req);
-    const result = await svc.getDomains(parsed.data as Parameters<typeof svc.getDomains>[0]);
+    const result = await svc.domains.getDomains(parsed.data as Parameters<typeof svc.domains.getDomains>[0]);
 
     res.json({
       items: result.items.map((r) => r.record),
@@ -90,7 +90,7 @@ domainsRouter.get(
   cacheMiddleware('domain'),
   asyncHandler(async (req: Request, res: Response) => {
     const domain = decodeURIComponent(req.params.domain!);
-    const row = await getService(req).getDomain(domain);
+    const row = await getService(req).domains.getDomain(domain);
     if (!row) throw ApiError.notFound(`Domain not found: ${domain}`);
     res.json(row.record);
   }),
@@ -105,7 +105,7 @@ domainsRouter.post(
     if (!parsed.success) throw ApiError.badRequest('Validation failed', formatZodErrors(parsed.error));
 
     try {
-      const row = await getService(req).createDomain(
+      const row = await getService(req).domains.createDomain(
         parsed.data,
         actor(req),
         req.ip || '',
@@ -131,7 +131,7 @@ domainsRouter.patch(
     if (!parsed.success) throw ApiError.badRequest('Validation failed', formatZodErrors(parsed.error));
 
     try {
-      const row = await getService(req).updateDomain(
+      const row = await getService(req).domains.updateDomain(
         domain,
         parsed.data,
         actor(req),
@@ -155,7 +155,7 @@ domainsRouter.delete(
   '/:domain',
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const domain = decodeURIComponent(req.params.domain!);
-    const deleted = await getService(req).deleteDomains(
+    const deleted = await getService(req).domains.deleteDomains(
       [domain],
       actor(req),
       req.ip || '',
@@ -177,7 +177,7 @@ domainsRouter.post(
     const { action, domains, value } = parsed.data;
 
     if (action === 'delete') {
-      const count = await getService(req).deleteDomains(
+      const count = await getService(req).domains.deleteDomains(
         domains,
         actor(req),
         req.ip || '',
@@ -187,7 +187,7 @@ domainsRouter.post(
       return;
     }
 
-    const count = await getService(req).bulkDomains(
+    const count = await getService(req).domains.bulkDomains(
       action as 'tag' | 'untag' | 'categorize' | 'pause' | 'resume',
       domains,
       value,

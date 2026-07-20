@@ -22,7 +22,10 @@
     "playwright": "^1.49.1",
     "sharp": "^0.33.5",
     "tldts": "^6.1.71",
-    "undici": "^7.2.0"
+    "undici": "^7.2.0",
+    "@uptime/database": "workspace:*",
+    "@uptime/supabase": "workspace:*",
+    "pino": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

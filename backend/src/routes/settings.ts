@@ -4,10 +4,10 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { asyncHandler, ApiError } from '../middleware/errorHandler.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 const savedFilterSchema = z.object({
@@ -27,7 +27,7 @@ export const settingsRouter: import('express').Router = Router();
 settingsRouter.get(
   '/',
   asyncHandler(async (req: Request, res: Response) => {
-    const settings = await getService(req).getSettings();
+    const settings = await getService(req).provider.settings.read();
     res.json(settings);
   }),
 );

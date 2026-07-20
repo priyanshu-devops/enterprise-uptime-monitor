@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Plus, Search, Download, Loader2 } from 'lucide-react';
 import type { DomainRecord } from '@uptime/shared';
@@ -43,7 +43,7 @@ const STATUS_OPTIONS = [
   'ERROR',
 ];
 
-export default function DomainsPage() {
+function DomainsContent() {
   const searchParams = useSearchParams();
   const { data, isLoading, isError, error, refetch } = useDomains();
   const [search, setSearch] = useState('');
@@ -163,6 +163,14 @@ export default function DomainsPage() {
 
       <AddDomainDialog open={addOpen} onOpenChange={setAddOpen} />
     </>
+  );
+}
+
+export default function DomainsPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <DomainsContent />
+    </Suspense>
   );
 }
 

@@ -7,8 +7,11 @@
  * rate limit across many domains (100 IPs per request).
  */
 import { request } from 'undici';
+import pino from 'pino';
 import type { HostingResult } from '@uptime/shared';
 import { opSignal } from './signal.js';
+
+const logger = pino({ name: 'hosting' });
 
 /** Fields we request from ip-api (numeric bitmask keeps the response small). */
 const FIELDS = 'status,message,isp,org,as,country,query';
@@ -58,7 +61,12 @@ export async function checkHosting(
 ): Promise<HostingResult> {
   if (!ip) return { ok: false, isp: '', org: '', asn: '', country: '', error: 'No IP' };
   try {
-    const res = await request(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=${FIELDS}`, {
+    const key = process.env.IP_API_KEY;
+    const baseUrl = key ? 'https://pro.ip-api.com' : 'http://ip-api.com';
+    const auth = key ? `&key=${key}` : '';
+    if (!key) logger.warn('Using unencrypted ip-api.com fallback because IP_API_KEY is not set');
+    
+    const res = await request(`${baseUrl}/json/${encodeURIComponent(ip)}?fields=${FIELDS}${auth}`, {
       method: 'GET',
       headers: { 'user-agent': 'UptimeMonitor/1.0' },
       signal: opSignal(timeoutMs, signal),
@@ -94,7 +102,11 @@ export async function checkHostingBatch(
   for (let i = 0; i < unique.length; i += 100) {
     const batch = unique.slice(i, i + 100);
     try {
-      const res = await request(`http://ip-api.com/batch?fields=${FIELDS}`, {
+      const key = process.env.IP_API_KEY;
+      const baseUrl = key ? 'https://pro.ip-api.com' : 'http://ip-api.com';
+      const auth = key ? `&key=${key}` : '';
+
+      const res = await request(`${baseUrl}/batch?fields=${FIELDS}${auth}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'user-agent': 'UptimeMonitor/1.0' },
         body: JSON.stringify(batch.map((q) => ({ query: q }))),

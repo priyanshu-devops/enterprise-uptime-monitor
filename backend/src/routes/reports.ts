@@ -11,11 +11,11 @@ import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import PDFDocument from 'pdfkit';
 import { asyncHandler, ApiError } from '../middleware/errorHandler.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 import type { Report, ReportPeriod } from '@uptime/shared';
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 const generateSchema = z.object({
@@ -209,14 +209,14 @@ reportsRouter.get(
 
 // ── Report builder ────────────────────────────────────────────────────────────
 
-async function buildReport(svc: SheetsService, period: ReportPeriod, from?: string, to?: string): Promise<Report> {
+async function buildReport(svc: ServiceContainer, period: ReportPeriod, from?: string, to?: string): Promise<Report> {
   const [kpis, distributions, incidents] = await Promise.all([
-    svc.getKpis(),
-    svc.getDistributions(),
-    svc.getIncidents(),
+    svc.domains.getKpis(),
+    svc.domains.getDistributions(),
+    svc.provider.incidents.readAll(),
   ]);
 
-  const allDomains = await svc.readAllDomains();
+  const allDomains = await svc.domains.readAllDomains();
 
   const now = new Date();
   const rangeEnd = to ?? now.toISOString().slice(0, 10);

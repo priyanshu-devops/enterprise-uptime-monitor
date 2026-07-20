@@ -10,10 +10,10 @@ import { Router, type Request, type Response } from 'express';
 import type { Incident, SlaReport } from '@uptime/shared';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { cacheMiddleware } from '../middleware/cache.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 /** Fetch JSON from the Pages cache with a short timeout; null on any failure. */
@@ -49,7 +49,7 @@ publicRouter.get(
 
     // Live fallback when the Pages cache is unavailable.
     if (incidents.length === 0 && !summary) {
-      incidents = await getService(req).getIncidents().catch(() => []);
+      incidents = await getService(req).provider.incidents.readAll().catch(() => []);
     }
 
     const openIncidents = incidents

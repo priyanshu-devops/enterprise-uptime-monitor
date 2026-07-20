@@ -12,7 +12,7 @@ import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import { normalizeDomain } from '@uptime/shared';
 import { asyncHandler, ApiError } from '../middleware/errorHandler.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import type { ImportRowPreview } from '@uptime/shared';
 
@@ -40,8 +40,8 @@ const xlsxBodySchema = z.object({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 function actor(req: AuthRequest): string {
@@ -109,7 +109,7 @@ importRouter.post(
     if (!parsed.success) throw ApiError.badRequest('Invalid import body');
 
     const svc = getService(req);
-    const existing = await svc.readAllDomains();
+    const existing = await svc.domains.readAllDomains();
     const knownDomains = new Set(existing.map((r) => r.record.domain));
 
     const previews = await buildPreviews(parsed.data.rows, knownDomains);
@@ -126,12 +126,12 @@ importRouter.post(
     if (!parsed.success) throw ApiError.badRequest('Invalid import body');
 
     const svc = getService(req);
-    const existing = await svc.readAllDomains();
+    const existing = await svc.domains.readAllDomains();
     const knownDomains = new Set(existing.map((r) => r.record.domain));
 
     const previews = await buildPreviews(parsed.data.rows, knownDomains);
 
-    const report = await svc.importDomains(
+    const report = await svc.domains.importDomains(
       previews,
       actor(req),
       req.ip || '',
@@ -221,7 +221,7 @@ importRouter.post(
 importRouter.get(
   '/history',
   asyncHandler(async (req: Request, res: Response) => {
-    const history = await getService(req).getImportHistory();
+    const history = await getService(req).provider.imports.readAll();
     res.json({ items: history, total: history.length });
   }),
 );

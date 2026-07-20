@@ -42,6 +42,10 @@ export class CacheService {
       return null;
     }
 
+    // LRU: move recently accessed item to the end of the Map
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+
     return entry;
   }
 
@@ -153,19 +157,11 @@ export class CacheService {
    * Evict the oldest entry.
    */
   private evictOldest(): void {
-    let oldestKey: string | null = null;
-    let oldestTime = Date.now();
-
-    for (const [key, entry] of this.cache.entries()) {
-      if (entry.timestamp < oldestTime) {
-        oldestTime = entry.timestamp;
-        oldestKey = key;
-      }
-    }
-
-    if (oldestKey) {
-      this.cache.delete(oldestKey);
-      logger.debug({ evicted: oldestKey }, 'Cache eviction');
+    // Map iteration is insertion-order. The first key is the least recently used.
+    const firstKey = this.cache.keys().next().value;
+    if (firstKey !== undefined) {
+      this.cache.delete(firstKey);
+      logger.debug({ evicted: firstKey }, 'Cache eviction');
     }
   }
 

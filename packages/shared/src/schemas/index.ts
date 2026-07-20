@@ -7,11 +7,11 @@ import { z } from 'zod';
 export const loginSchema = z.object({
   email: z.string().email().max(254),
   password: z.string().min(8).max(128),
-});
+}).strict();
 
 /** Create-domain payload (user-owned fields). */
 export const createDomainSchema = z.object({
-  website: z.string().min(4).max(2048),
+  website: z.string().url().regex(/^https?:\/\//i, 'Must be an http or https URL').max(2048),
   company: z.string().max(200).optional().default(''),
   project: z.string().max(200).optional().default(''),
   owner: z.string().max(200).optional().default(''),
@@ -19,7 +19,7 @@ export const createDomainSchema = z.object({
   notes: z.string().max(2000).optional().default(''),
   tags: z.string().max(500).optional().default(''),
   category: z.string().max(200).optional().default(''),
-});
+}).strict();
 
 /** Patch-domain payload. */
 export const updateDomainSchema = createDomainSchema.partial();
@@ -29,7 +29,7 @@ export const bulkDomainSchema = z.object({
   action: z.enum(['delete', 'tag', 'untag', 'categorize', 'pause', 'resume']),
   domains: z.array(z.string().min(1)).min(1).max(1000),
   value: z.string().max(200).optional(),
-});
+}).strict();
 
 /** One import row before normalization. */
 export const importRowSchema = z.object({
@@ -40,20 +40,22 @@ export const importRowSchema = z.object({
   department: z.string().optional().default(''),
   tags: z.string().optional().default(''),
   category: z.string().optional().default(''),
-});
+}).strict();
 
 /** Import commit payload. */
 export const importCommitSchema = z.object({
   source: z.enum(['csv', 'xlsx', 'txt', 'paste', 'manual', 'sheet']),
   rows: z.array(importRowSchema).min(1).max(5000),
-});
+}).strict();
 
 /** Job trigger payload. */
 export const triggerJobSchema = z.object({
   domains: z.array(z.string()).max(100).optional(),
   limit: z.number().int().min(1).max(2000).optional(),
+  batchStart: z.number().int().min(1).optional(),
+  batchEnd: z.number().int().min(1).optional(),
   skipScreenshots: z.boolean().optional().default(false),
-});
+}).strict();
 
 /** Domain list query params. */
 export const domainListQuerySchema = z.object({

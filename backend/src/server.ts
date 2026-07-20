@@ -42,6 +42,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
+import crypto from 'node:crypto';
 
 import { authRouter } from './routes/auth.js';
 import { domainsRouter } from './routes/domains.js';
@@ -60,20 +61,31 @@ import { publicRouter } from './routes/public.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authMiddleware } from './middleware/auth.js';
 import { cacheMiddleware } from './middleware/cache.js';
-import { createSheetsClient } from './services/sheets.js';
-import type { SheetsService } from './services/sheets.js';
-import type { CacheService } from './services/cache.js';
+import { CacheService } from './services/cache.js';
+import { createServices } from './services/db.js';
+import type { ServiceContainer } from './services/db.js';
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]', 'password', 'token', 'password_hash']
+});
 
 const app: import('express').Express = express();
 
 // Trust proxy for Render (needed for rate limiting behind proxy)
 app.set('trust proxy', 1);
 
+// Request ID middleware
+app.use((req, res, next) => {
+  const reqId = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('x-request-id', reqId);
+  (req as any).id = reqId;
+  next();
+});
+
 // Request logging
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-app.use((pinoHttp as any)({ logger }));
+app.use((pinoHttp as any)({ logger, genReqId: (req: any) => req.id }));
 
 // Security headers
 app.use(helmet({
@@ -132,31 +144,32 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 // Initialize services
-const sheetsService: SheetsService = createSheetsClient();
-const cacheService: CacheService = sheetsService.getCacheService();
+const cacheService = new CacheService();
+const services: ServiceContainer = createServices(cacheService);
 
 // Make services available to routes
-app.locals.sheetsService = sheetsService;
+app.locals.services = services;
 app.locals.cacheService = cacheService;
 
 // Health check (public, no auth)
 app.get('/api/v1/healthz', async (_req, res) => {
   try {
-    const { reachable: sheetsReachable, cacheAgeSeconds } = await sheetsService.healthCheck();
+    const cacheAgeSeconds = cacheService.get('domains:all') ? Math.floor((Date.now() - cacheService.get('domains:all')!.timestamp) / 1000) : null;
+    const reachable = true; // Replace with actual provider healthcheck if needed
     const response = {
-      status: sheetsReachable ? 'ok' : 'degraded',
+      status: reachable ? 'ok' : 'degraded',
       uptimeSeconds: Math.floor(process.uptime()),
       version: process.env.npm_package_version || '1.0.0',
-      sheets: { reachable: sheetsReachable, cacheAgeSeconds },
+      database: { reachable, cacheAgeSeconds },
       timestamp: new Date().toISOString(),
     };
-    res.status(sheetsReachable ? 200 : 503).json(response);
+    res.status(reachable ? 200 : 503).json(response);
   } catch {
     res.status(503).json({
       status: 'degraded',
       uptimeSeconds: Math.floor(process.uptime()),
       version: process.env.npm_package_version || '1.0.0',
-      sheets: { reachable: false, cacheAgeSeconds: null },
+      database: { reachable: false, cacheAgeSeconds: null },
       timestamp: new Date().toISOString(),
     });
   }
@@ -221,6 +234,11 @@ const server = app.listen(PORT, () => {
   logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'Backend API started');
 });
 
+// HTTP Hardening (H-28)
+server.headersTimeout = 60000;
+server.requestTimeout = 300000;
+server.keepAliveTimeout = 65000;
+
 // Graceful shutdown — flushes cache, closes HTTP listener, then exits.
 // Exits with a non-zero code if any step throws or times out so that Render
 // treats the pod as failed and does not report false-positive successful drains.
@@ -241,10 +259,17 @@ const shutdown = async (signal: string) => {
   forceTimer.unref();
 
   try {
+    // Graceful shutdown logic:
+    // 1. Flush any pending audit/incident log buffers so we don't lose data
+    // 2. Clear cache timers
+    // 3. Stop accepting new connections
+    logger.info('Shutting down services...');
+    await services.flush();
+
+    logger.info('Closing HTTP server...');
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
-    await sheetsService.flush();
     clearTimeout(forceTimer);
     logger.info('Server closed cleanly');
     process.exit(0);

@@ -9,3 +9,4 @@ export {
   ImportHistoryRepository,
   SettingsRepository,
 } from './logRepositories.js';
+export { GSheetsDatabaseProvider } from './provider.js';

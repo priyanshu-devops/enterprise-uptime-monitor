@@ -6,11 +6,11 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 import type { CacheService } from '../services/cache.js';
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 function getCache(req: Request): CacheService {
@@ -33,7 +33,7 @@ sheetsRouter.get(
     // Try to get row count from cached domains
     let rowCount: number | null = null;
     try {
-      const domains = await svc.readAllDomains();
+      const domains = await svc.domains.readAllDomains();
       rowCount = domains.length;
     } catch {
       rowCount = null;
@@ -62,7 +62,7 @@ sheetsRouter.post(
     // Eagerly re-read domains to warm the cache
     let rowCount = 0;
     try {
-      const domains = await svc.readAllDomains(true);
+      const domains = await svc.domains.readAllDomains(true);
       rowCount = domains.length;
     } catch {
       // Non-fatal — cache is cleared, next request will re-hydrate

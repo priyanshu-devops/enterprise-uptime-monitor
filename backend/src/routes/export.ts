@@ -14,7 +14,7 @@ import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import PDFDocument from 'pdfkit';
 import { asyncHandler, ApiError } from '../middleware/errorHandler.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 import { sanitizeSheetCell, type DomainRecord } from '@uptime/shared';
 
 const querySchema = z.object({
@@ -23,8 +23,8 @@ const querySchema = z.object({
   q: z.string().optional(),
 });
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 const EXPORT_COLUMNS: Array<keyof DomainRecord> = [
@@ -49,7 +49,7 @@ exportRouter.get(
     const { format, status, q } = parsed.data;
     const svc = getService(req);
 
-    const result = await svc.getDomains({ status, q, pageSize: 10000 });
+    const result = await svc.domains.getDomains({ status, q, pageSize: 10000 });
     const domains = result.items.map((r) => r.record);
 
     const date = new Date().toISOString().slice(0, 10);

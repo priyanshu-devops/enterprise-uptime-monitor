@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@uptime/shared": "workspace:*",
-    "googleapis": "^144.0.0"
+    "googleapis": "^144.0.0",
+    "@uptime/database": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

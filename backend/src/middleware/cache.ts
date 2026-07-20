@@ -39,7 +39,7 @@ export function cacheMiddleware(
     const queryString = Object.keys(req.query).length
       ? '?' + new URLSearchParams(req.query as Record<string, string>).toString()
       : '';
-    const cacheKey = `${keyPrefix}${req.path}${queryString}`;
+    const cacheKey = `${keyPrefix}:${req.path}${queryString}`;
 
     const cached = cacheService.get(cacheKey);
     if (cached) {
@@ -56,8 +56,8 @@ export function cacheMiddleware(
     // Intercept res.json to cache the response
     const originalJson = res.json.bind(res);
     res.json = (body: unknown) => {
-      // Only cache successful responses
-      if (res.statusCode >= 200 && res.statusCode < 300) {
+      // Only cache successful responses that have a body
+      if (res.statusCode >= 200 && res.statusCode < 300 && body !== undefined && body !== null) {
         cacheService.set(cacheKey, body, ttlSeconds);
       }
       return originalJson(body);

@@ -9,10 +9,10 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import { cacheMiddleware } from '../middleware/cache.js';
-import type { SheetsService } from '../services/sheets.js';
+import type { ServiceContainer } from '../services/db.js';
 
-function getService(req: Request): SheetsService {
-  return req.app.locals.sheetsService as SheetsService;
+function getService(req: Request): ServiceContainer {
+  return req.app.locals.services as ServiceContainer;
 }
 
 export const analyticsRouter: import('express').Router = Router();
@@ -23,7 +23,7 @@ analyticsRouter.get(
   '/kpis',
   cacheMiddleware('analytics:kpis', 120),
   asyncHandler(async (req: Request, res: Response) => {
-    const kpis = await getService(req).getKpis();
+    const kpis = await getService(req).domains.getKpis();
     res.json(kpis);
   }),
 );
@@ -65,7 +65,7 @@ analyticsRouter.get(
 
     // Fallback: derive trend from current snapshot if no Pages history
     if (points.length === 0) {
-      const kpis = await getService(req).getKpis();
+      const kpis = await getService(req).domains.getKpis();
       points.push({
         date: new Date().toISOString().slice(0, 10),
         up: kpis.healthy,
@@ -117,7 +117,7 @@ analyticsRouter.get(
   '/distributions',
   cacheMiddleware('analytics:distributions', 300),
   asyncHandler(async (req: Request, res: Response) => {
-    const distributions = await getService(req).getDistributions();
+    const distributions = await getService(req).domains.getDistributions();
     res.json(distributions);
   }),
 );
