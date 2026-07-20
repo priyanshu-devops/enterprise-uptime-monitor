@@ -607,6 +607,45 @@ export class SheetsService {
     return this.incidentRepo.readAll();
   }
 
+  /**
+   * Acknowledge or manually resolve an incident (dashboard action).
+   *
+   * @returns The updated incident, or null when the id is unknown.
+   */
+  async updateIncident(
+    id: string,
+    action: 'ack' | 'resolve',
+    actor: string,
+  ): Promise<Incident | null> {
+    const incidents = await this.incidentRepo.readAll();
+    const incident = incidents.find((i) => i.id === id);
+    if (!incident) return null;
+
+    const now = new Date().toISOString();
+    const updated: Incident = { ...incident };
+    if (action === 'ack') {
+      updated.ackedAt = now;
+      updated.ackedBy = actor;
+    } else {
+      updated.status = 'resolved';
+      updated.resolvedAt = updated.resolvedAt ?? now;
+      updated.ackedAt = updated.ackedAt ?? now;
+      updated.ackedBy = updated.ackedBy || actor;
+      if (updated.durationSeconds === null) {
+        const openedMs = new Date(updated.openedAt).getTime();
+        const resolvedMs = new Date(updated.resolvedAt).getTime();
+        if (!Number.isNaN(openedMs) && !Number.isNaN(resolvedMs)) {
+          updated.durationSeconds = Math.max(0, Math.round((resolvedMs - openedMs) / 1000));
+        }
+      }
+    }
+
+    await this.incidentRepo.update([updated]);
+    this.cache.invalidatePrefix('incidents');
+    this.cache.invalidatePrefix('monitoring:');
+    return updated;
+  }
+
   /** Get audit log. */
   async getAuditLog(): Promise<AuditEntry[]> {
     return this.auditRepo.readAll();
@@ -651,15 +690,63 @@ export class SheetsService {
 
 /**
  * Factory that reads env vars and returns a fully-initialised SheetsService.
- * In MOCK_DATA=1 mode the credentials are optional (no real Sheet calls will
- * be made by demo routes, or they will fail gracefully).
+ *
+ * Semantics (audit C-2):
+ *   - When `MOCK_DATA=1` or `NODE_ENV=test`, credentials are optional and we
+ *     substitute a syntactically-valid stub JSON so unit tests can exercise
+ *     the code path without hitting Google. Real API calls will still fail
+ *     if attempted; that's expected in mock/test.
+ *   - Outside mock/test, both `SHEET_ID` and `GOOGLE_SERVICE_ACCOUNT_JSON_B64`
+ *     are required. If either is missing we THROW at boot instead of silently
+ *     wiring up an unusable client.
  */
 export function createSheetsClient(): SheetsService {
   const cacheService = new CacheService();
-  const spreadsheetId = process.env.SHEET_ID || 'mock-sheet-id';
-  const serviceAccountJsonB64 =
-    process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64 ||
-    Buffer.from(JSON.stringify({ type: 'service_account' })).toString('base64');
+  const mock = process.env.MOCK_DATA === '1' || process.env.NODE_ENV === 'test';
+
+  const spreadsheetId = process.env.SHEET_ID || (mock ? 'mock-sheet-id' : '');
+  let serviceAccountJsonB64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64 || '';
+
+  if (!mock) {
+    // Fail fast — we would previously boot with a stub that made every
+    // Sheets call look like a Google API error, masking the real problem.
+    if (!spreadsheetId) {
+      throw new Error(
+        'SHEET_ID is required (set MOCK_DATA=1 to boot without real Google Sheets credentials)',
+      );
+    }
+    if (!serviceAccountJsonB64) {
+      throw new Error(
+        'GOOGLE_SERVICE_ACCOUNT_JSON_B64 is required (set MOCK_DATA=1 to boot without real Google Sheets credentials)',
+      );
+    }
+    // Sanity-check the base64 decodes to plausible service-account JSON —
+    // catches copy-paste truncation before the first API call is attempted.
+    try {
+      const decoded = Buffer.from(serviceAccountJsonB64, 'base64').toString('utf8');
+      const parsed = JSON.parse(decoded);
+      if (parsed?.type !== 'service_account' || !parsed?.private_key || !parsed?.client_email) {
+        throw new Error('parsed JSON is not a service account (missing type/private_key/client_email)');
+      }
+    } catch (err) {
+      throw new Error(
+        `GOOGLE_SERVICE_ACCOUNT_JSON_B64 is not a valid base64-encoded service-account JSON: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  } else if (!serviceAccountJsonB64) {
+    // Mock mode with no credentials: substitute a syntactically-valid stub.
+    // Real API calls will still fail, which is what we want in tests.
+    serviceAccountJsonB64 = Buffer.from(
+      JSON.stringify({
+        type: 'service_account',
+        client_email: 'mock@mock.iam.gserviceaccount.com',
+        // 32-byte dummy private key — not valid, but shape-correct.
+        private_key: '-----BEGIN PRIVATE KEY-----\nMOCK\n-----END PRIVATE KEY-----\n',
+      }),
+    ).toString('base64');
+  }
 
   return new SheetsService({
     spreadsheetId,

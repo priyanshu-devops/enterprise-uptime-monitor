@@ -35,3 +35,16 @@ Thumbs.db
 .gemini/
 
 backend/.env
+
+# AI Generated & Temporary Docs
+scripts/blueprint-gen/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Internal Documentation
+*.md
+!README.md
+!*/README.md

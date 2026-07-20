@@ -11,6 +11,7 @@ import {
   SHEET_TABS,
   rowToRecord,
   recordToRow,
+  sanitizeSheetCell,
   type DomainRecord,
 } from '@uptime/shared';
 import type { SheetsClient } from './client.js';
@@ -90,9 +91,14 @@ export class DomainsRepository {
     if (rowNumber === undefined) return false;
     const data = Object.entries(fields).map(([field, value]) => {
       const col = COLUMN_BY_FIELD[field as keyof DomainRecord];
+      // Sanitize per-cell (audit C-4). Only the imageFormula column may carry a
+      // genuine =IMAGE("…") formula; every other field is forced to literal text.
+      const cell = sanitizeSheetCell(value ?? '', {
+        allowImageFormula: field === 'imageFormula',
+      });
       return {
         range: `${SHEET_TABS.domains}!${col.letter}${rowNumber}`,
-        values: [[value ?? '']],
+        values: [[cell]],
       };
     });
     await this.client.batchUpdate(data);

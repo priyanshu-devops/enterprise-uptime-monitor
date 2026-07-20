@@ -86,6 +86,31 @@ analyticsRouter.get(
   }),
 );
 
+// ── GET /sla ──────────────────────────────────────────────────────────────────
+
+analyticsRouter.get(
+  '/sla',
+  cacheMiddleware('analytics:sla', 300),
+  asyncHandler(async (_req: Request, res: Response) => {
+    const pagesBase = process.env.PAGES_BASE_URL || '';
+    if (pagesBase) {
+      try {
+        const r = await fetch(`${pagesBase}/cache/sla.json`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (r.ok) {
+          res.json(await r.json());
+          return;
+        }
+      } catch {
+        // fall through to the empty response
+      }
+    }
+    // No SLA data yet (first run pending) — the frontend hides the section.
+    res.json(null);
+  }),
+);
+
 // ── GET /distributions ────────────────────────────────────────────────────────
 
 analyticsRouter.get(

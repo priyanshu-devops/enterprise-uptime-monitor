@@ -72,11 +72,14 @@ export async function runDomain(
   const deadline = startedAt + config.domainBudgetMs;
   const timeout = config.opTimeoutMs;
   const overBudget = (): boolean => performance.now() > deadline;
+  // Hard budget: aborts any in-flight socket/query the moment the domain
+  // budget expires, instead of only checking between stages. (audit C-5)
+  const budget = AbortSignal.timeout(config.domainBudgetMs);
 
   const circuitOpen = isCircuitOpen(state?.consecutiveFailures ?? 0);
 
   // --- DNS -----------------------------------------------------------------
-  const dns = await checkDns(input.domain, timeout);
+  const dns = await checkDns(input.domain, timeout, budget);
   const serverIp = dns.a[0] ?? dns.aaaa[0] ?? '';
 
   // Short-circuit: no DNS => nothing else is reachable.
@@ -97,12 +100,12 @@ export async function runDomain(
   }
 
   // --- HTTP ----------------------------------------------------------------
-  const http = await checkHttp(input.website, timeout);
+  const http = await checkHttp(input.website, timeout, budget);
 
   // --- SSL (only meaningful when https was reachable) ----------------------
   const ssl =
     http.https || input.website.startsWith('https://')
-      ? await checkSsl(input.domain, timeout)
+      ? await checkSsl(input.domain, timeout, 443, budget)
       : emptySsl();
 
   // --- Content / tech / security from the already-fetched body -------------
@@ -120,12 +123,13 @@ export async function runDomain(
 
   if (!skipDeep) {
     // RDAP with 7-day cache from state.
-    rdap = cachedRdap(state) ?? (await safeRdap(input.domain, timeout, logger));
+    rdap = cachedRdap(state) ?? (await safeRdap(input.domain, timeout, logger, budget));
     // Hosting with 7-day cache from state.
     hosting =
-      cachedHosting(state) ?? (serverIp ? await checkHosting(serverIp, timeout) : EMPTY_HOSTING);
+      cachedHosting(state) ??
+      (serverIp ? await checkHosting(serverIp, timeout, budget) : EMPTY_HOSTING);
     if (http.ok && !overBudget()) {
-      crawlFiles = await checkCrawlFiles(http.finalUrl || input.website, timeout);
+      crawlFiles = await checkCrawlFiles(http.finalUrl || input.website, timeout, budget);
     }
   } else {
     // Still reuse cached lookups even when the breaker is open — they're free.
@@ -143,7 +147,11 @@ export async function runDomain(
   // --- Screenshot (only for reachable sites, not over budget, engine present)
   let screenshot = emptyShot();
   if (screenshotEngine && http.ok && !skipDeep && !overBudget()) {
-    screenshot = await screenshotEngine.capture(input.domain, http.finalUrl || input.website);
+    screenshot = await screenshotEngine.capture(
+      input.domain,
+      http.finalUrl || input.website,
+      budget,
+    );
   }
 
   return finalize(input, status, startedAt, circuitOpen, state, logger, {
@@ -261,9 +269,14 @@ function cachedHosting(state: DomainState | undefined): HostingResult | undefine
 }
 
 /** RDAP that never throws. */
-async function safeRdap(domain: string, timeout: number, logger: Logger): Promise<RdapResult> {
+async function safeRdap(
+  domain: string,
+  timeout: number,
+  logger: Logger,
+  signal?: AbortSignal,
+): Promise<RdapResult> {
   try {
-    return await checkRdap(domain, timeout);
+    return await checkRdap(domain, timeout, signal);
   } catch (err) {
     logger.debug('RDAP lookup failed', { domain, error: errMessage(err) });
     return EMPTY_RDAP;

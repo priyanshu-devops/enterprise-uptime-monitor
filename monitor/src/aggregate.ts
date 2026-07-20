@@ -2,15 +2,17 @@
  * Aggregate step.
  *
  * Runs on the single `aggregate` job after all `check` shards complete. Reads
- * every shard artifact, detects incidents against prior state, writes the merged
- * results to the sheet, updates the per-domain state, and emits the cache bundle
- * (domains/summary/incidents/state/history) plus copied screenshots into the
- * storage directory that the workflow then commits to the storage repo.
+ * every shard artifact, runs the incident lifecycle against the persistent
+ * ledger (open/resolve with durations), updates per-domain state + rolling SLA
+ * samples, writes the merged results to the sheet, sends alert notifications,
+ * and emits the cache bundle (domains/summary/incidents/state/sla/history)
+ * plus copied screenshots into the storage directory that the workflow then
+ * commits to the storage repo.
  */
-import { cp, mkdir } from 'node:fs/promises';
+import { cp, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import type { DomainRecord, Incident } from '@uptime/shared';
+import type { DomainRecord, Incident, SlaSample } from '@uptime/shared';
 import type { MonitorConfig } from './config.js';
 import type { Logger } from './logging.js';
 import { errMessage } from './logging.js';
@@ -19,6 +21,11 @@ import { nextState } from './pipeline/pool.js';
 import { detectIncidents } from './output/incidents.js';
 import { writeToSheet } from './output/sheetWriter.js';
 import { buildSummary, writeCache } from './output/cacheWriter.js';
+import { buildSlaReport } from './output/sla.js';
+import { sendAlerts } from './output/alerts.js';
+
+/** Max incidents retained in the cache ledger (newest first). */
+const LEDGER_CAP = 500;
 
 /** Options for the aggregate step. */
 export interface AggregateOptions {
@@ -34,6 +41,24 @@ export interface AggregateOptions {
   dryRun?: boolean;
 }
 
+/** Read the persistent incident ledger from the storage checkout. */
+async function readLedger(cacheDir: string): Promise<Incident[]> {
+  try {
+    const raw = await readFile(path.join(cacheDir, 'incidents.json'), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    // Backfill fields added after older runs wrote the file.
+    return (parsed as Partial<Incident>[]).map((i) => ({
+      durationSeconds: null,
+      ackedAt: null,
+      ackedBy: '',
+      ...i,
+    })) as Incident[];
+  } catch {
+    return [];
+  }
+}
+
 /** Aggregate results and publish to sheet + storage. */
 export async function runAggregate(
   opts: AggregateOptions,
@@ -42,6 +67,7 @@ export async function runAggregate(
 ): Promise<void> {
   const cacheDir = path.join(opts.storageDir, 'cache');
   const priorState = await readState(path.join(cacheDir, 'state.json'));
+  const ledger = await readLedger(cacheDir);
 
   const { results, anyAborted } = await readAllShardArtifacts(opts.inputDir);
   logger.info('Loaded shard results', { count: results.length, anyAborted });
@@ -51,12 +77,24 @@ export async function runAggregate(
     return;
   }
 
-  // Detect incidents and compute the next state per domain.
-  const allIncidents: Incident[] = [];
+  // Open ledger incidents grouped by domain, for dedupe + resolution.
+  const openByDomain = new Map<string, Incident[]>();
+  for (const inc of ledger) {
+    if (inc.status !== 'open') continue;
+    const list = openByDomain.get(inc.domain) ?? [];
+    list.push(inc);
+    openByDomain.set(inc.domain, list);
+  }
+
+  // Incident lifecycle + next state per domain.
+  const opened: Incident[] = [];
+  const resolved: Incident[] = [];
   const nextDomains: Record<string, ReturnType<typeof nextState>> = {};
   for (const result of results) {
     const prior = priorState.domains[result.domain];
-    for (const inc of detectIncidents(result, prior)) allIncidents.push(inc);
+    const delta = detectIncidents(result, prior, openByDomain.get(result.domain) ?? []);
+    opened.push(...delta.opened);
+    resolved.push(...delta.resolved);
     nextDomains[result.domain] = nextState(result, prior);
   }
   // Preserve state for domains not checked this run (e.g. sharded-out subsets).
@@ -65,7 +103,29 @@ export async function runAggregate(
   }
   const newState = { updatedAt: new Date().toISOString(), domains: nextDomains };
 
-  const summary = buildSummary(results, opts.runId, opts.startedAt, allIncidents);
+  // Merge lifecycle changes into the ledger: replace resolved by id, prepend opened.
+  const resolvedById = new Map(resolved.map((i) => [i.id, i]));
+  const mergedLedger = [
+    ...opened,
+    ...ledger.map((i) => resolvedById.get(i.id) ?? i),
+  ]
+    .sort((a, b) => (a.openedAt < b.openedAt ? 1 : -1))
+    .slice(0, LEDGER_CAP);
+
+  logger.info('Incident lifecycle', {
+    opened: opened.length,
+    resolved: resolved.length,
+    ledger: mergedLedger.length,
+  });
+
+  const summary = buildSummary(results, opts.runId, opts.startedAt, [...opened, ...resolved]);
+
+  // SLA report from the rolling samples in the new state.
+  const samplesByDomain: Record<string, SlaSample[]> = {};
+  for (const [domain, state] of Object.entries(nextDomains)) {
+    if (state.samples && state.samples.length > 0) samplesByDomain[domain] = state.samples;
+  }
+  const sla = buildSlaReport(samplesByDomain, mergedLedger, opts.runId);
 
   // Write to the sheet (unless dry-run).
   let records: DomainRecord[];
@@ -73,7 +133,7 @@ export async function runAggregate(
     logger.warn('Dry run — not writing to sheet');
     records = [];
   } else {
-    const sheetResult = await writeToSheet(results, allIncidents, config, logger);
+    const sheetResult = await writeToSheet(results, opened, resolved, config, logger);
     records = sheetResult.records;
   }
 
@@ -85,17 +145,27 @@ export async function runAggregate(
     cacheDir,
     records,
     summary,
-    incidents: allIncidents,
+    incidents: mergedLedger,
     state: newState,
+    sla,
   });
   logger.info('Wrote cache files', { files: written.length });
+
+  // Alert notifications (fail-soft; skipped in dry-run).
+  if (!opts.dryRun) {
+    await sendAlerts(
+      { opened, resolved, summary, dashboardUrl: process.env.DASHBOARD_URL ?? '' },
+      logger,
+    );
+  }
 
   // Persist logs into the storage repo.
   await writeRunLog(opts.storageDir, logger);
 
   logger.info('Aggregate complete', {
     domains: results.length,
-    incidents: allIncidents.length,
+    opened: opened.length,
+    resolved: resolved.length,
     up: summary.up,
     down: summary.down,
     screenshots: summary.screenshotsCaptured,

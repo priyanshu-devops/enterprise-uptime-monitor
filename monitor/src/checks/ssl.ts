@@ -36,15 +36,27 @@ function issuerName(issuer: tls.PeerCertificate['issuer'] | undefined): string {
  * @param hostname Bare hostname for SNI and cert-name matching.
  * @param timeoutMs Connection timeout.
  * @param port TLS port (default 443).
+ * @param signal Optional external abort (e.g. the per-domain budget) that
+ *   tears the socket down immediately instead of waiting out the timeout.
  */
-export function checkSsl(hostname: string, timeoutMs = 10_000, port = 443): Promise<SslResult> {
+export function checkSsl(
+  hostname: string,
+  timeoutMs = 10_000,
+  port = 443,
+  signal?: AbortSignal,
+): Promise<SslResult> {
   return new Promise((resolve) => {
     const result = baseResult();
     let settled = false;
 
+    const onAbort = (): void => {
+      finish({ ...result, error: 'TLS check aborted (budget exceeded)' });
+    };
+
     const finish = (r: SslResult): void => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', onAbort);
       try {
         socket.destroy();
       } catch {
@@ -52,6 +64,12 @@ export function checkSsl(hostname: string, timeoutMs = 10_000, port = 443): Prom
       }
       resolve(r);
     };
+
+    if (signal?.aborted) {
+      resolve({ ...result, error: 'TLS check aborted (budget exceeded)' });
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     const socket = tls.connect(
       {

@@ -9,6 +9,7 @@ export * from './types/api.js';
 export * from './schemas/index.js';
 export * from './sheets/columns.js';
 export * from './sheets/serialize.js';
+export * from './sheets/sanitize.js';
 export * from './scoring/health.js';
 export * from './scoring/risk.js';
 export * from './utils/normalizeDomain.js';

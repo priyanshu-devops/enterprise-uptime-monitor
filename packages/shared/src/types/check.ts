@@ -182,6 +182,12 @@ export interface Incident {
   fromStatus: string;
   toStatus: string;
   message: string;
+  /** Seconds from openedAt to resolvedAt; null while open. */
+  durationSeconds: number | null;
+  /** When an operator acknowledged the incident (dashboard); null if never. */
+  ackedAt: string | null;
+  /** Who acknowledged (operator email). */
+  ackedBy: string;
 }
 
 /** Per-run summary written to cache/summary.json. */
@@ -222,6 +228,9 @@ export interface HistoryPoint {
   availabilityPct: number;
 }
 
+/** One compact per-run sample kept in DomainState for SLA math: [ISO time, status, responseMs]. */
+export type SlaSample = [string, string, number];
+
 /** Per-domain circuit-breaker + lookup-cache state persisted between runs. */
 export interface DomainState {
   consecutiveFailures: number;
@@ -235,10 +244,55 @@ export interface DomainState {
   hostingFetchedAt?: string;
   /** Recent statuses, newest first, max 14 entries (for flap/risk detection). */
   recentStatuses: string[];
+  /** Rolling check samples, newest first, capped (~90 days at 2 runs/day). */
+  samples?: SlaSample[];
 }
 
 /** cache/state.json shape. */
 export interface StateFile {
   updatedAt: string;
   domains: Record<string, DomainState>;
+}
+
+// ---------------------------------------------------------------------------
+// SLA / uptime windows (cache/sla.json)
+// ---------------------------------------------------------------------------
+
+/** Uptime percentages over standard windows; null when no samples in window. */
+export interface SlaWindows {
+  '24h': number | null;
+  '7d': number | null;
+  '30d': number | null;
+  '90d': number | null;
+}
+
+/** Per-domain SLA entry. */
+export interface DomainSla {
+  domain: string;
+  uptime: SlaWindows;
+  /** Response-time percentiles over the 30d window (successful checks), ms. */
+  p50Ms: number | null;
+  p95Ms: number | null;
+  p99Ms: number | null;
+  /** Samples counted in the 30d window. */
+  sampleCount30d: number;
+  /** Current status from the latest run. */
+  status: string;
+}
+
+/** cache/sla.json shape — fleet rollup + per-domain entries. */
+export interface SlaReport {
+  generatedAt: string;
+  runId: string;
+  /** Fleet-wide uptime (mean of per-domain window uptimes). */
+  fleet: SlaWindows;
+  /** Fleet response percentiles over 30d (all successful samples pooled). */
+  fleetP50Ms: number | null;
+  fleetP95Ms: number | null;
+  fleetP99Ms: number | null;
+  /** Mean time to recovery over resolved incidents in the last 30d, seconds. */
+  mttrSeconds30d: number | null;
+  /** Resolved incidents counted in the MTTR window. */
+  incidentsResolved30d: number;
+  domains: DomainSla[];
 }

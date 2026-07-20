@@ -6,6 +6,7 @@
  */
 import { getGlobalDispatcher, interceptors, request } from 'undici';
 import type { CrawlFilesResult } from '@uptime/shared';
+import { opSignal } from './signal.js';
 
 /** Dispatcher that follows up to 3 redirects to the canonical file location. */
 const redirectDispatcher = getGlobalDispatcher().compose(
@@ -13,13 +14,13 @@ const redirectDispatcher = getGlobalDispatcher().compose(
 );
 
 /** Probe a well-known file; returns true when it appears to exist. */
-async function probe(url: string, timeoutMs: number): Promise<boolean> {
+async function probe(url: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
   try {
     const res = await request(url, {
       method: 'GET',
       headers: { 'user-agent': 'UptimeMonitor/1.0' },
       dispatcher: redirectDispatcher,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: opSignal(timeoutMs, signal),
     });
     const ok = res.statusCode >= 200 && res.statusCode < 300;
     await res.body.dump().catch(() => undefined);
@@ -35,7 +36,11 @@ async function probe(url: string, timeoutMs: number): Promise<boolean> {
  * @param origin Origin URL (scheme + host), e.g. "https://example.com".
  * @param timeoutMs Per-probe timeout.
  */
-export async function checkCrawlFiles(origin: string, timeoutMs = 10_000): Promise<CrawlFilesResult> {
+export async function checkCrawlFiles(
+  origin: string,
+  timeoutMs = 10_000,
+  signal?: AbortSignal,
+): Promise<CrawlFilesResult> {
   let base: string;
   try {
     base = new URL(origin).origin;
@@ -44,8 +49,8 @@ export async function checkCrawlFiles(origin: string, timeoutMs = 10_000): Promi
   }
 
   const [robotsTxt, sitemapXml] = await Promise.all([
-    probe(`${base}/robots.txt`, timeoutMs),
-    probe(`${base}/sitemap.xml`, timeoutMs),
+    probe(`${base}/robots.txt`, timeoutMs, signal),
+    probe(`${base}/sitemap.xml`, timeoutMs, signal),
   ]);
 
   return { robotsTxt, sitemapXml };

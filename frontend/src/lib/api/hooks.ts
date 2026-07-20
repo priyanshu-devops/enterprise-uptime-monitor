@@ -28,6 +28,7 @@ import type {
   LoginResponse,
   MonitoringStatus,
   Paginated,
+  SlaReport,
   TriggerJobRequest,
   UpdateDomainRequest,
 } from '@uptime/shared';
@@ -45,6 +46,7 @@ export const queryKeys = {
   audit: (page: number) => ['audit', page] as const,
   logs: (category: string, date: string) => ['logs', category, date] as const,
   settings: ['settings'] as const,
+  sla: ['analytics', 'sla'] as const,
   health: ['health'] as const,
   reports: ['reports'] as const,
   importHistory: ['import', 'history'] as const,
@@ -100,6 +102,15 @@ export function useIncidents() {
     queryKey: queryKeys.incidents,
     queryFn: () => apiGet<{ incidents: Incident[] }>('/monitoring/incidents'),
     staleTime: 30000,
+  });
+}
+
+/** SLA report (uptime windows + percentiles); null until the first run writes it. */
+export function useSla() {
+  return useQuery({
+    queryKey: queryKeys.sla,
+    queryFn: () => apiGet<SlaReport | null>('/analytics/sla'),
+    staleTime: 60000,
   });
 }
 
@@ -219,6 +230,19 @@ export function useBulkDomains(options?: MutOpts<unknown, BulkDomainRequest>) {
   return useMutation({
     mutationFn: (body: BulkDomainRequest) => apiMutate<unknown>('POST', '/domains/bulk', body),
     onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.domains }),
+    ...options,
+  });
+}
+
+/** Acknowledge or manually resolve an incident. */
+export function useIncidentAction(
+  options?: MutOpts<Incident, { id: string; action: 'ack' | 'resolve' }>,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'ack' | 'resolve' }) =>
+      apiMutate<Incident>('PATCH', `/monitoring/incidents/${encodeURIComponent(id)}`, { action }),
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.incidents }),
     ...options,
   });
 }

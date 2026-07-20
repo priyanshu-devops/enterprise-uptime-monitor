@@ -12,6 +12,8 @@ import type { Logger } from '../logging.js';
 import { runDomain, type CheckInput } from './runner.js';
 import { GlobalBreaker, isInfraFailure } from './circuitBreaker.js';
 import { ScreenshotEngine } from '../screenshot/engine.js';
+import { appendSample } from '../output/sla.js';
+import { registerCleanup } from '../lifecycle.js';
 
 /** Outcome of running one shard. */
 export interface ShardRunResult {
@@ -44,13 +46,18 @@ export async function runShard(
   let aborted = false;
 
   const screenshotEngine = skipScreenshots ? undefined : new ScreenshotEngine(outputDir, logger);
+  // Ensure Chromium dies on SIGTERM/SIGINT (workflow cancellation) too — the
+  // finally below only covers normal completion. (audit C-7)
+  const unregisterCleanup = screenshotEngine
+    ? registerCleanup(() => screenshotEngine.close())
+    : undefined;
 
   // A wrapper that serializes screenshot capture through its own smaller pool,
   // so the browser isn't hammered by httpPool-many concurrent contexts.
   const engineProxy = screenshotEngine
     ? {
-        capture: (domain: string, url: string) =>
-          screenshotLimit(() => screenshotEngine.capture(domain, url)),
+        capture: (domain: string, url: string, signal?: AbortSignal) =>
+          screenshotLimit(() => screenshotEngine.capture(domain, url, signal)),
         close: () => screenshotEngine.close(),
       }
     : undefined;
@@ -80,6 +87,7 @@ export async function runShard(
     );
     await Promise.all(tasks);
   } finally {
+    unregisterCleanup?.();
     if (screenshotEngine) await screenshotEngine.close();
   }
 
@@ -111,6 +119,7 @@ export function nextState(result: CheckResult, prior: DomainState | undefined): 
     consecutiveFailures: failed ? (prior?.consecutiveFailures ?? 0) + 1 : 0,
     lastStatus: result.status,
     recentStatuses: recent,
+    samples: appendSample(prior?.samples, result),
   };
 
   // Refresh RDAP cache when the live lookup succeeded; else retain prior.

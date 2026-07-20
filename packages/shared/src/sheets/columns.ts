@@ -141,6 +141,9 @@ export const INCIDENT_HEADERS = [
   'From Status',
   'To Status',
   'Message',
+  'Duration Seconds',
+  'Acked At',
+  'Acked By',
 ] as const;
 
 /** ImportHistory columns. */

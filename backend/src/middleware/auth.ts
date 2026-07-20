@@ -1,6 +1,12 @@
 /**
  * JWT authentication middleware.
  * Verifies Bearer token and attaches user to request.
+ *
+ * Hardening (audit C-1):
+ *   - Both `jwt.sign` and `jwt.verify` are pinned to HS256 to block
+ *     algorithm-confusion attacks (`alg: "none"`, RS256↔HS256).
+ *   - `JWT_SECRET` length is enforced by the boot-time env validator; here we
+ *     still fail closed if it's absent (defense in depth).
  */
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
@@ -8,6 +14,9 @@ import pino from 'pino';
 import type { LoginResponse } from '@uptime/shared';
 
 const logger = pino({ name: 'auth' });
+
+/** The single JWT algorithm this codebase accepts. */
+const JWT_ALGORITHM = 'HS256' as const;
 
 /** JWT payload shape. */
 interface JwtPayload {
@@ -43,7 +52,9 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
   }
 
   try {
-    const payload = jwt.verify(token, secret) as JwtPayload;
+    // Pin algorithm: verify() will reject tokens signed with any other alg,
+    // including the infamous `alg: "none"`.
+    const payload = jwt.verify(token, secret, { algorithms: [JWT_ALGORITHM] }) as JwtPayload;
     if (payload.email !== process.env.ADMIN_EMAIL) {
       res.status(403).json({ status: 403, title: 'Forbidden', detail: 'Email mismatch' });
       return;
@@ -66,8 +77,18 @@ export function generateToken(): LoginResponse {
   if (!secret || !adminEmail) {
     throw new Error('Auth configuration missing');
   }
+  // Defensive check — env validator should have blocked this already in prod,
+  // but if generateToken is called from a context where the validator was
+  // bypassed (e.g. a test spawning the router directly), refuse to sign with a
+  // weak key.
+  if (process.env.NODE_ENV === 'production' && secret.length < 32) {
+    throw new Error('JWT_SECRET too short for production (need ≥ 32 chars)');
+  }
   const expiresIn = process.env.JWT_EXPIRES_IN || '24h';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const token = jwt.sign({ email: adminEmail, role: 'admin' }, secret, { expiresIn } as any);
+  const token = jwt.sign({ email: adminEmail, role: 'admin' }, secret, {
+    expiresIn,
+    algorithm: JWT_ALGORITHM,
+  } as any);
   return { token, expiresIn, user: { email: adminEmail, role: 'admin' } };
 }

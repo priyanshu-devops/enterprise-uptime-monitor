@@ -34,13 +34,15 @@ export interface SheetWriteResult {
  * Write the run's results to the sheet.
  *
  * @param results Merged results (deduped by domain) from all shards.
- * @param incidents Incidents to log.
+ * @param opened Newly opened incidents (appended to the IncidentLog tab).
+ * @param resolved Incidents resolved this run (updated in place by id).
  * @param config Engine config (sheet id + creds + pages url).
  * @param logger Logger.
  */
 export async function writeToSheet(
   results: CheckResult[],
-  incidents: Incident[],
+  opened: Incident[],
+  resolved: Incident[],
   config: MonitorConfig,
   logger: Logger,
 ): Promise<SheetWriteResult> {
@@ -83,11 +85,17 @@ export async function writeToSheet(
   logger.info('Wrote domain rows', writeResult);
 
   let incidentCount = 0;
-  if (incidents.length > 0) {
+  if (opened.length > 0 || resolved.length > 0) {
     const incidentRepo = new IncidentLogRepository(client);
-    await incidentRepo.append(incidents);
-    incidentCount = incidents.length;
-    logger.info('Appended incidents', { count: incidentCount });
+    if (opened.length > 0) {
+      await incidentRepo.append(opened);
+      logger.info('Appended incidents', { count: opened.length });
+    }
+    if (resolved.length > 0) {
+      const updated = await incidentRepo.update(resolved);
+      logger.info('Resolved incidents in ledger', { requested: resolved.length, updated });
+    }
+    incidentCount = opened.length + resolved.length;
   }
 
   return {

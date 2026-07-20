@@ -4,6 +4,7 @@
  */
 import {
   SHEET_TABS,
+  sanitizeSheetRow,
   type AppSettings,
   type AuditEntry,
   type Incident,
@@ -23,18 +24,22 @@ export class AuditLogRepository {
 
   /** Queue an audit entry; flushes automatically. */
   record(entry: AuditEntry): void {
-    this.buffer.push([
-      entry.timestamp,
-      entry.actor,
-      entry.action,
-      entry.target,
-      entry.ip,
-      entry.userAgent,
-      entry.status,
-      entry.before,
-      entry.after,
-      entry.reason,
-    ]);
+    // Audit rows carry attacker-influencable text (actor, target, userAgent,
+    // before/after). None is ever a formula, so sanitize the whole row. (C-4)
+    this.buffer.push(
+      sanitizeSheetRow([
+        entry.timestamp,
+        entry.actor,
+        entry.action,
+        entry.target,
+        entry.ip,
+        entry.userAgent,
+        entry.status,
+        entry.before,
+        entry.after,
+        entry.reason,
+      ]),
+    );
     if (this.buffer.length >= this.flushEvery) {
       void this.flush();
     } else if (!this.timer) {
@@ -87,35 +92,78 @@ export class IncidentLogRepository {
   async append(incidents: Incident[]): Promise<void> {
     if (incidents.length === 0) return;
     await this.client.append(
-      `${SHEET_TABS.incidentLog}!A2:I`,
-      incidents.map((i) => [
-        i.id,
-        i.domain,
-        i.type,
-        i.status,
-        i.openedAt,
-        i.resolvedAt ?? '',
-        i.fromStatus,
-        i.toStatus,
-        i.message,
-      ]),
+      `${SHEET_TABS.incidentLog}!A2:L`,
+      incidents.map((i) => toRow(i)),
     );
   }
 
   async readAll(): Promise<Incident[]> {
-    const [rows] = await this.client.batchGet([`${SHEET_TABS.incidentLog}!A2:I`]);
-    return (rows ?? []).map((r) => ({
-      id: str(r[0]),
-      domain: str(r[1]),
-      type: str(r[2]) as Incident['type'],
-      status: (str(r[3]) as Incident['status']) || 'open',
-      openedAt: str(r[4]),
-      resolvedAt: str(r[5]) || null,
-      fromStatus: str(r[6]),
-      toStatus: str(r[7]),
-      message: str(r[8]),
-    }));
+    const [rows] = await this.client.batchGet([`${SHEET_TABS.incidentLog}!A2:L`]);
+    return (rows ?? []).map((r) => fromRow(r));
   }
+
+  /**
+   * Overwrite specific incidents in place, matched by id.
+   * Reads the id column to locate rows; unknown ids are skipped.
+   *
+   * @returns Number of rows actually updated.
+   */
+  async update(incidents: Incident[]): Promise<number> {
+    if (incidents.length === 0) return 0;
+    const [idRows] = await this.client.batchGet([`${SHEET_TABS.incidentLog}!A2:A`]);
+    const rowById = new Map<string, number>();
+    (idRows ?? []).forEach((r, i) => {
+      const id = str(r[0]);
+      if (id) rowById.set(id, i + 2); // sheet rows are 1-based; +1 for header
+    });
+    const updates: { range: string; values: unknown[][] }[] = [];
+    for (const inc of incidents) {
+      const row = rowById.get(inc.id);
+      if (row === undefined) continue;
+      updates.push({ range: `${SHEET_TABS.incidentLog}!A${row}:L${row}`, values: [toRow(inc)] });
+    }
+    if (updates.length > 0) await this.client.batchUpdate(updates);
+    return updates.length;
+  }
+}
+
+/** Serialize an incident to its sheet row (columns A..L). */
+function toRow(i: Incident): unknown[] {
+  // `domain` and `message` are influenced by monitored content; neutralize the
+  // whole row against formula injection (C-4).
+  return sanitizeSheetRow([
+    i.id,
+    i.domain,
+    i.type,
+    i.status,
+    i.openedAt,
+    i.resolvedAt ?? '',
+    i.fromStatus,
+    i.toStatus,
+    i.message,
+    i.durationSeconds ?? '',
+    i.ackedAt ?? '',
+    i.ackedBy,
+  ]);
+}
+
+/** Parse a sheet row (columns A..L) into an incident. */
+function fromRow(r: unknown[]): Incident {
+  const dur = Number(str(r[9]));
+  return {
+    id: str(r[0]),
+    domain: str(r[1]),
+    type: str(r[2]) as Incident['type'],
+    status: (str(r[3]) as Incident['status']) || 'open',
+    openedAt: str(r[4]),
+    resolvedAt: str(r[5]) || null,
+    fromStatus: str(r[6]),
+    toStatus: str(r[7]),
+    message: str(r[8]),
+    durationSeconds: str(r[9]) !== '' && Number.isFinite(dur) ? dur : null,
+    ackedAt: str(r[10]) || null,
+    ackedBy: str(r[11]),
+  };
 }
 
 /** ImportHistory tab repository. */
@@ -135,7 +183,7 @@ export class ImportHistoryRepository {
     skipped: number;
   }): Promise<void> {
     await this.client.append(`${SHEET_TABS.importHistory}!A2:J`, [
-      [
+      sanitizeSheetRow([
         row.importId,
         row.importedAt,
         row.actor,
@@ -146,7 +194,7 @@ export class ImportHistoryRepository {
         row.invalid,
         row.corrected,
         row.skipped,
-      ],
+      ]),
     ]);
   }
 

@@ -10,10 +10,15 @@
  *   screenshots/{domain}/thumb.jpg
  *
  * Stable paths mean the sheet's =IMAGE() URLs never change between runs.
+ *
+ * Memory bounds (audit C-6): third-party media/fonts/analytics are blocked at
+ * the network layer, each page has a total download budget, and the browser
+ * process is recycled after a fixed number of captures so Chromium's
+ * accumulated heap/renderer state can't grow across a large shard.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { chromium, type Browser } from 'playwright';
+import { chromium, type Browser, type Page } from 'playwright';
 import sharp from 'sharp';
 import type { ScreenshotResult } from '@uptime/shared';
 import type { Logger } from '../logging.js';
@@ -26,22 +31,63 @@ const JPEG_QUALITY = 70;
 const NAV_TIMEOUT_MS = 15_000;
 const SETTLE_MS = 2500;
 
+/** Recycle the browser process after this many captures (bounds Chromium memory). */
+const RECYCLE_AFTER_CAPTURES = 40;
+
+/** Total bytes a single page load may download before further requests are cut. */
+const PAGE_BYTE_BUDGET = 15 * 1024 * 1024;
+
+/**
+ * Resource types that don't affect a viewport screenshot but dominate page
+ * weight. Images and stylesheets are kept — they ARE the screenshot.
+ */
+const BLOCKED_RESOURCE_TYPES = new Set(['media', 'font']);
+
+/** Analytics/ad/tracking hosts — irrelevant to rendering, often megabytes. */
+const BLOCKED_URL_RE =
+  /google-analytics\.com|googletagmanager\.com|doubleclick\.net|googlesyndication\.com|adservice\.google|connect\.facebook\.net|hotjar\.com|mixpanel\.com|segment\.(io|com)|clarity\.ms|fullstory\.com|intercom\.io|newrelic\.com|nr-data\.net/i;
+
+/** Sleep that resolves early when the signal aborts (replaces waitForTimeout). */
+function settle(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done(): void {
+      signal?.removeEventListener('abort', done);
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
 /** Manages one browser instance for a batch of captures. */
 export class ScreenshotEngine {
   private browser: Browser | null = null;
+  private captures = 0;
+  private inFlight = 0;
 
   constructor(
     private readonly outputDir: string,
     private readonly logger: Logger,
   ) {}
 
-  /** Lazily launch the shared browser. */
+  /**
+   * Lazily launch the shared browser; recycle it after N captures. Recycling
+   * only happens when this capture is the sole user — closing a browser out
+   * from under a concurrent capture would fail its contexts.
+   */
   private async ensureBrowser(): Promise<Browser> {
+    if (this.browser && this.captures >= RECYCLE_AFTER_CAPTURES && this.inFlight <= 1) {
+      this.logger.info('Recycling browser', { captures: this.captures });
+      await this.close();
+    }
     if (!this.browser) {
-      this.browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-      });
+      // --no-sandbox is a container workaround, not a default: only CI runners
+      // (rootless containers without user namespaces) need it.
+      const args = ['--disable-dev-shm-usage', '--disable-gpu'];
+      if (process.env.CI) args.push('--no-sandbox');
+      this.browser = await chromium.launch({ headless: true, args });
+      this.captures = 0;
     }
     return this.browser;
   }
@@ -51,8 +97,9 @@ export class ScreenshotEngine {
    *
    * @param domain Normalized domain (used for the output path).
    * @param url URL to load (final URL from the HTTP stage is best).
+   * @param signal Optional abort (per-domain budget) — skips remaining work.
    */
-  async capture(domain: string, url: string): Promise<ScreenshotResult> {
+  async capture(domain: string, url: string, signal?: AbortSignal): Promise<ScreenshotResult> {
     const dir = path.join(this.outputDir, 'screenshots', domain);
     const desktopPath = path.join(dir, 'desktop.jpg');
     const mobilePath = path.join(dir, 'mobile.jpg');
@@ -66,12 +113,15 @@ export class ScreenshotEngine {
     };
 
     if (!url) return { ...empty, error: 'No URL to capture' };
+    if (signal?.aborted) return { ...empty, error: 'Screenshot skipped (budget exceeded)' };
 
+    this.inFlight++;
     try {
       await mkdir(dir, { recursive: true });
       const browser = await this.ensureBrowser();
+      this.captures++;
 
-      const desktopBuf = await this.shoot(browser, url, DESKTOP);
+      const desktopBuf = await this.shoot(browser, url, DESKTOP, signal);
       await sharp(desktopBuf).jpeg({ quality: JPEG_QUALITY }).toFile(desktopPath);
       await sharp(desktopBuf)
         .resize({ width: THUMB_WIDTH })
@@ -79,12 +129,16 @@ export class ScreenshotEngine {
         .toFile(thumbPath);
 
       let mobileOk = true;
-      try {
-        const mobileBuf = await this.shoot(browser, url, MOBILE);
-        await sharp(mobileBuf).jpeg({ quality: JPEG_QUALITY }).toFile(mobilePath);
-      } catch (err) {
+      if (signal?.aborted) {
         mobileOk = false;
-        this.logger.warn('Mobile screenshot failed', { domain, error: errMessage(err) });
+      } else {
+        try {
+          const mobileBuf = await this.shoot(browser, url, MOBILE, signal);
+          await sharp(mobileBuf).jpeg({ quality: JPEG_QUALITY }).toFile(mobilePath);
+        } catch (err) {
+          mobileOk = false;
+          this.logger.warn('Mobile screenshot failed', { domain, error: errMessage(err) });
+        }
       }
 
       return {
@@ -96,6 +150,8 @@ export class ScreenshotEngine {
     } catch (err) {
       this.logger.warn('Screenshot capture failed', { domain, error: errMessage(err) });
       return { ...empty, error: errMessage(err) };
+    } finally {
+      this.inFlight--;
     }
   }
 
@@ -104,9 +160,11 @@ export class ScreenshotEngine {
     browser: Browser,
     url: string,
     viewport: { width: number; height: number },
+    signal?: AbortSignal,
   ): Promise<Buffer> {
     let lastErr: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (signal?.aborted) break;
       const context = await browser.newContext({
         viewport,
         userAgent:
@@ -114,9 +172,10 @@ export class ScreenshotEngine {
         ignoreHTTPSErrors: true,
       });
       const page = await context.newPage();
+      await this.boundPage(page);
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
-        await page.waitForTimeout(SETTLE_MS);
+        await settle(SETTLE_MS, signal);
         const buf = await page.screenshot({ type: 'png', fullPage: false });
         return buf;
       } catch (err) {
@@ -126,6 +185,31 @@ export class ScreenshotEngine {
       }
     }
     throw lastErr instanceof Error ? lastErr : new Error('screenshot failed');
+  }
+
+  /**
+   * Attach network-layer bounds to a page: block heavyweight/irrelevant
+   * resources and cut off requests once the total download budget is spent.
+   */
+  private async boundPage(page: Page): Promise<void> {
+    let bytesLeft = PAGE_BYTE_BUDGET;
+
+    page.on('response', (res) => {
+      const len = Number(res.headers()['content-length']);
+      if (Number.isFinite(len)) bytesLeft -= len;
+    });
+
+    await page.route('**/*', (route) => {
+      const req = route.request();
+      if (
+        bytesLeft <= 0 ||
+        BLOCKED_RESOURCE_TYPES.has(req.resourceType()) ||
+        BLOCKED_URL_RE.test(req.url())
+      ) {
+        return route.abort();
+      }
+      return route.continue();
+    });
   }
 
   /** Close the shared browser. Safe to call multiple times. */

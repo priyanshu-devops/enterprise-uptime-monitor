@@ -107,6 +107,10 @@ export interface TriggerJobRequest {
   /** Limit to specific domains (comma-joined for workflow input). */
   domains?: string[];
   limit?: number;
+  /** Batch start index (1-based, e.g., 1 for first domain) */
+  batchStart?: number;
+  /** Batch end index (e.g., 50 for domains 1-50) */
+  batchEnd?: number;
   skipScreenshots?: boolean;
 }
 

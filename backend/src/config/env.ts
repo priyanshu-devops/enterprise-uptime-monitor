@@ -3,6 +3,11 @@
  *
  * In MOCK_DATA / test mode the Google Sheets and GitHub credentials are
  * optional so the server can boot with in-memory fakes for local dev.
+ *
+ * Production hardening:
+ *   - JWT_SECRET must be ≥ 32 characters outside dev/test/mock (audit item C-1)
+ *   - Real credentials required when NODE_ENV=production and MOCK_DATA≠1
+ *   - FRONTEND_ORIGIN must be a concrete allowlist in production (audit item C-3)
  */
 import { z } from 'zod';
 
@@ -18,10 +23,11 @@ const envSchema = z
     ADMIN_EMAIL: z.string().email().max(254),
     /** bcrypt hash of the admin password. Optional in mock mode (a default is generated). */
     ADMIN_PASSWORD_HASH: z.string().optional().default(''),
+    // Absolute floor of 8 (dev convenience); production is raised to 32 in superRefine.
     JWT_SECRET: z.string().min(8),
     JWT_EXPIRES_IN: z.string().default('24h'),
 
-    /** Comma-separated CORS allowlist; empty = allow all (dev). */
+    /** Comma-separated CORS allowlist. Required in production (see C-3). */
     FRONTEND_ORIGIN: z.string().optional().default(''),
 
     GOOGLE_SERVICE_ACCOUNT_JSON_B64: z.string().optional().default(''),
@@ -38,6 +44,17 @@ const envSchema = z
   })
   .superRefine((env, ctx) => {
     const mock = env.MOCK_DATA === '1' || env.NODE_ENV === 'test';
+    const production = env.NODE_ENV === 'production';
+
+    // In production, JWT_SECRET must be a proper 256-bit-equivalent key.
+    if (production && env.JWT_SECRET.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message: 'Must be at least 32 characters in production (use a 256-bit random secret)',
+      });
+    }
+
     if (!mock) {
       if (!env.SHEET_ID) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['SHEET_ID'], message: 'Required unless MOCK_DATA=1' });
@@ -56,6 +73,24 @@ const envSchema = z
           message: 'Required unless MOCK_DATA=1',
         });
       }
+    }
+
+    // In production, refuse to boot without a concrete FRONTEND_ORIGIN allowlist.
+    if (production && !env.FRONTEND_ORIGIN.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FRONTEND_ORIGIN'],
+        message: 'Required in production — set to a comma-separated allowlist of frontend origins',
+      });
+    }
+
+    // A literal "*" in production is unsafe when combined with credentials.
+    if (production && env.FRONTEND_ORIGIN.trim() === '*') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FRONTEND_ORIGIN'],
+        message: 'Cannot be "*" in production — provide explicit origins',
+      });
     }
   });
 

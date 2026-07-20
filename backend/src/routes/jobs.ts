@@ -15,6 +15,8 @@ const GITHUB_API = 'https://api.github.com';
 const triggerSchema = z.object({
   domains: z.array(z.string()).optional(),
   limit: z.number().int().min(1).max(1000).optional(),
+  batchStart: z.number().int().min(1).optional(),
+  batchEnd: z.number().int().min(1).optional(),
   skipScreenshots: z.boolean().optional(),
 });
 
@@ -75,11 +77,13 @@ jobsRouter.post(
     }
 
     const { owner, repo } = getRepoCoords();
-    const { domains, limit, skipScreenshots } = parsed.data;
+    const { domains, limit, batchStart, batchEnd, skipScreenshots } = parsed.data;
 
     const inputs: Record<string, string> = {};
     if (domains?.length) inputs['domains'] = domains.join(',');
     if (limit) inputs['limit'] = String(limit);
+    if (batchStart) inputs['batch_start'] = String(batchStart);
+    if (batchEnd) inputs['batch_end'] = String(batchEnd);
     if (skipScreenshots) inputs['skip_screenshots'] = 'true';
 
     const r = await fetch(

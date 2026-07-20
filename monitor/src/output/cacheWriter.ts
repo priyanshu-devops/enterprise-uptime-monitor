@@ -20,6 +20,7 @@ import {
   type HistoryPoint,
   type Incident,
   type RunSummary,
+  type SlaReport,
   type StateFile,
 } from '@uptime/shared';
 
@@ -120,6 +121,7 @@ export interface CacheWriteOptions {
   summary: RunSummary;
   incidents: Incident[];
   state: StateFile;
+  sla: SlaReport;
 }
 
 /**
@@ -128,19 +130,21 @@ export interface CacheWriteOptions {
  * @returns The path list written (for logging).
  */
 export async function writeCache(opts: CacheWriteOptions): Promise<string[]> {
-  const { cacheDir, records, summary, incidents, state } = opts;
+  const { cacheDir, records, summary, incidents, state, sla } = opts;
   const written: string[] = [];
 
   const domainsFile = path.join(cacheDir, 'domains.json');
   const summaryFile = path.join(cacheDir, 'summary.json');
   const incidentsFile = path.join(cacheDir, 'incidents.json');
   const stateFile = path.join(cacheDir, 'state.json');
+  const slaFile = path.join(cacheDir, 'sla.json');
 
   await writeJson(domainsFile, records);
   await writeJson(summaryFile, summary);
   await writeJson(incidentsFile, incidents);
   await writeJson(stateFile, state);
-  written.push(domainsFile, summaryFile, incidentsFile, stateFile);
+  await writeJson(slaFile, sla);
+  written.push(domainsFile, summaryFile, incidentsFile, stateFile, slaFile);
 
   // Daily history point: cache/history/YYYY-MM/DD.json
   const point = buildHistoryPoint(summary);

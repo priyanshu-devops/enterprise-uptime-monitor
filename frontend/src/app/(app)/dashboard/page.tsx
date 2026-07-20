@@ -11,8 +11,17 @@ import {
   Clock,
   Cloud,
   RefreshCw,
+  Check,
+  CheckCheck,
 } from 'lucide-react';
-import { useKpis, useMonitoringStatus, useIncidents, useTriggerJob } from '@/lib/api/hooks';
+import type { Incident } from '@uptime/shared';
+import {
+  useKpis,
+  useMonitoringStatus,
+  useIncidents,
+  useIncidentAction,
+  useTriggerJob,
+} from '@/lib/api/hooks';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatCard } from '@/components/stat-card';
 import { StatusBadge } from '@/components/status-badge';
@@ -21,7 +30,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/toast';
-import { fmtMs, fmtNum, relativeTime } from '@/lib/utils';
+import { fmtDuration, fmtMs, fmtNum, relativeTime } from '@/lib/utils';
+
+/** Mean time to recovery over incidents resolved in the last 30 days. */
+function mttr30d(incidents: Incident[]): number | null {
+  const cutoff = Date.now() - 30 * 86400000;
+  const durations = incidents
+    .filter(
+      (i) =>
+        i.status === 'resolved' &&
+        i.durationSeconds != null &&
+        i.resolvedAt &&
+        new Date(i.resolvedAt).getTime() >= cutoff,
+    )
+    .map((i) => i.durationSeconds!);
+  if (durations.length === 0) return null;
+  return Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+}
 
 export default function DashboardPage() {
   const kpis = useKpis();
@@ -34,7 +59,9 @@ export default function DashboardPage() {
 
   const k = kpis.data?.data;
   const lastRun = status.data?.data.lastRun;
-  const openIncidents = (incidents.data?.data.incidents ?? []).filter((i) => i.status === 'open');
+  const allIncidents = incidents.data?.data.incidents ?? [];
+  const openIncidents = allIncidents.filter((i) => i.status === 'open');
+  const mttr = mttr30d(allIncidents);
 
   return (
     <>
@@ -123,9 +150,16 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>Open incidents</CardTitle>
-            <Link href="/domains?status=DOWN" className="text-xs text-primary hover:underline">
-              View affected
-            </Link>
+            <div className="flex items-center gap-3">
+              {mttr !== null && (
+                <span className="text-2xs text-muted-foreground">
+                  MTTR 30d: <span className="font-medium text-foreground">{fmtDuration(mttr)}</span>
+                </span>
+              )}
+              <Link href="/domains?status=DOWN" className="text-xs text-primary hover:underline">
+                View affected
+              </Link>
+            </div>
           </CardHeader>
           <CardContent>
             {incidents.isLoading ? (
@@ -143,23 +177,7 @@ export default function DashboardPage() {
             ) : (
               <div className="divide-y">
                 {openIncidents.slice(0, 8).map((inc) => (
-                  <div key={inc.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <div className="min-w-0">
-                      <Link
-                        href={`/domains/${encodeURIComponent(inc.domain)}`}
-                        className="truncate text-sm font-medium hover:underline"
-                      >
-                        {inc.domain}
-                      </Link>
-                      <p className="truncate text-2xs text-muted-foreground">{inc.message}</p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <StatusBadge status={inc.toStatus} />
-                      <span className="hidden text-2xs text-muted-foreground sm:inline">
-                        {relativeTime(inc.openedAt)}
-                      </span>
-                    </div>
-                  </div>
+                  <IncidentRow key={inc.id} incident={inc} />
                 ))}
               </div>
             )}
@@ -213,6 +231,68 @@ export default function DashboardPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function IncidentRow({ incident: inc }: { incident: Incident }) {
+  const act = useIncidentAction({
+    onSuccess: (_d, vars) =>
+      toast.success(vars.action === 'ack' ? `Acknowledged ${inc.domain}` : `Resolved ${inc.domain}`),
+    onError: (e) => toast.error(e.message || 'Action failed'),
+  });
+
+  // Ongoing duration since the incident opened.
+  const openedMs = new Date(inc.openedAt).getTime();
+  const ongoingSec = Number.isNaN(openedMs) ? null : Math.round((Date.now() - openedMs) / 1000);
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/domains/${encodeURIComponent(inc.domain)}`}
+            className="truncate text-sm font-medium hover:underline"
+          >
+            {inc.domain}
+          </Link>
+          {inc.ackedAt && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
+              acked
+            </span>
+          )}
+        </div>
+        <p className="truncate text-2xs text-muted-foreground">{inc.message}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <StatusBadge status={inc.toStatus} />
+        <span className="hidden text-2xs text-muted-foreground sm:inline">
+          {relativeTime(inc.openedAt)}
+          {ongoingSec !== null && ongoingSec > 60 && ` · ${fmtDuration(ongoingSec)} ongoing`}
+        </span>
+        {!inc.ackedAt && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            title="Acknowledge"
+            disabled={act.isPending}
+            onClick={() => act.mutate({ id: inc.id, action: 'ack' })}
+          >
+            <Check className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          title="Mark resolved"
+          disabled={act.isPending}
+          onClick={() => act.mutate({ id: inc.id, action: 'resolve' })}
+        >
+          <CheckCheck className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
   );
 }
 

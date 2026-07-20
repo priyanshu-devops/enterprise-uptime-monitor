@@ -7,8 +7,16 @@ on:
     - cron: '30 15 * * *'
   workflow_dispatch:
     inputs:
+      batch_start:
+        description: 'Batch start index (1-based, e.g., 1 for first domain)'
+        required: false
+        type: number
+      batch_end:
+        description: 'Batch end index (e.g., 50 for domains 1-50)'
+        required: false
+        type: number
       limit:
-        description: 'Only check the first N domains (testing)'
+        description: 'Only check the first N domains (alternative to batch range)'
         required: false
         type: string
       domains:
@@ -63,6 +71,8 @@ jobs:
         id: matrix
         run: |
           node monitor/dist/index.js --plan \
+            ${{ inputs.batch_start && format('--batch-start {0}', inputs.batch_start) || '' }} \
+            ${{ inputs.batch_end && format('--batch-end {0}', inputs.batch_end) || '' }} \
             ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
             ${{ inputs.domains && format('--domains {0}', inputs.domains) || '' }} \
             > plan.json
@@ -112,6 +122,8 @@ jobs:
             --shard ${{ matrix.shard }} \
             --shard-count ${{ needs.prepare.outputs.shard_count }} \
             --output monitor/output \
+            ${{ inputs.batch_start && format('--batch-start {0}', inputs.batch_start) || '' }} \
+            ${{ inputs.batch_end && format('--batch-end {0}', inputs.batch_end) || '' }} \
             ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }} \
             ${{ inputs.domains && format('--domains {0}', inputs.domains) || '' }} \
             ${{ inputs.skip_screenshots == true && '--skip-screenshots' || '' }}
@@ -130,6 +142,14 @@ jobs:
     if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Alert channels (all optional; alerts are skipped when unset).
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+      ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+      DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
     steps:
       - uses: actions/checkout@v4
 

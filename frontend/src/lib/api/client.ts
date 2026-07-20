@@ -173,6 +173,10 @@ async function pagesFallback(path: string): Promise<unknown | undefined> {
     return distributionsFromDomains(await pagesDomains());
   }
 
+  if (pathname === '/analytics/sla') {
+    return pagesJson('/cache/sla.json').catch(() => null);
+  }
+
   return undefined;
 }
 

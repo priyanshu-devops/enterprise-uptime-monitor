@@ -9,6 +9,7 @@
 import { getDomain } from 'tldts';
 import { getGlobalDispatcher, interceptors, request } from 'undici';
 import type { RdapResult } from '@uptime/shared';
+import { opSignal } from './signal.js';
 
 /** Dispatcher that follows rdap.org's bootstrap redirects to the registry. */
 const redirectDispatcher = getGlobalDispatcher().compose(
@@ -57,14 +58,18 @@ function registrarFromEntities(entities: RdapEntity[] | undefined): string {
  * @param hostname Any hostname; the registrable domain is derived via tldts.
  * @param timeoutMs Request timeout.
  */
-export async function checkRdap(hostname: string, timeoutMs = 10_000): Promise<RdapResult> {
+export async function checkRdap(
+  hostname: string,
+  timeoutMs = 10_000,
+  signal?: AbortSignal,
+): Promise<RdapResult> {
   const registrable = getDomain(hostname) ?? hostname;
   try {
     const res = await request(`https://rdap.org/domain/${encodeURIComponent(registrable)}`, {
       method: 'GET',
       headers: { accept: 'application/rdap+json, application/json', 'user-agent': 'UptimeMonitor/1.0' },
       dispatcher: redirectDispatcher,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: opSignal(timeoutMs, signal),
     });
 
     if (res.statusCode >= 400) {

@@ -45,21 +45,44 @@ async function resolveAddresses(
  *
  * @param hostname Bare hostname (no scheme).
  * @param timeoutMs Per-query timeout.
+ * @param signal Optional external abort (e.g. the per-domain budget); cancels
+ *   all outstanding resolver queries immediately.
  */
-export async function checkDns(hostname: string, timeoutMs = 10_000): Promise<DnsResult> {
+export async function checkDns(
+  hostname: string,
+  timeoutMs = 10_000,
+  signal?: AbortSignal,
+): Promise<DnsResult> {
   const resolver = new Resolver({ timeout: timeoutMs, tries: 2 });
   resolver.setServers(RESOLVER_IPS);
 
-  const [a, aaaa, mxRecords, txtRecords, caaRecords, ns] = await Promise.all([
-    resolveAddresses(() => resolver.resolve4(hostname)),
-    resolveAddresses(() => resolver.resolve6(hostname)),
-    tryResolve(() => resolver.resolveMx(hostname)),
-    tryResolve(() => resolver.resolveTxt(hostname)),
-    tryResolve<{ critical: number; issue?: string; iodef?: string }>(() =>
-      resolver.resolveCaa(hostname),
-    ),
-    tryResolve(() => resolver.resolveNs(hostname)),
-  ]);
+  // Cancelled queries reject with ECANCELLED, which the wrappers below map to
+  // a resolver error rather than "no records" — so an aborted run is never
+  // mistaken for a dead domain.
+  const onAbort = (): void => resolver.cancel();
+  if (signal?.aborted) onAbort();
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  let a: { records: string[]; resolverError: boolean };
+  let aaaa: { records: string[]; resolverError: boolean };
+  let mxRecords: Awaited<ReturnType<typeof resolver.resolveMx>>;
+  let txtRecords: string[][];
+  let caaRecords: { critical: number; issue?: string; iodef?: string }[];
+  let ns: string[];
+  try {
+    [a, aaaa, mxRecords, txtRecords, caaRecords, ns] = await Promise.all([
+      resolveAddresses(() => resolver.resolve4(hostname)),
+      resolveAddresses(() => resolver.resolve6(hostname)),
+      tryResolve(() => resolver.resolveMx(hostname)),
+      tryResolve(() => resolver.resolveTxt(hostname)),
+      tryResolve<{ critical: number; issue?: string; iodef?: string }>(() =>
+        resolver.resolveCaa(hostname),
+      ),
+      tryResolve(() => resolver.resolveNs(hostname)),
+    ]);
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
 
   const aRecords = a.records;
   const aaaaRecords = aaaa.records;

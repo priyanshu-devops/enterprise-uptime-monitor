@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   await client.batchUpdate([
     { range: `${SHEET_TABS.domains}!A1:${LAST_COLUMN_LETTER}1`, values: [Array.from(HEADER_ROW)] },
     { range: `${SHEET_TABS.auditLog}!A1:J1`, values: [Array.from(AUDIT_HEADERS)] },
-    { range: `${SHEET_TABS.incidentLog}!A1:I1`, values: [Array.from(INCIDENT_HEADERS)] },
+    { range: `${SHEET_TABS.incidentLog}!A1:L1`, values: [Array.from(INCIDENT_HEADERS)] },
     { range: `${SHEET_TABS.importHistory}!A1:J1`, values: [Array.from(IMPORT_HISTORY_HEADERS)] },
     { range: `${SHEET_TABS.settings}!A1:B1`, values: [['Key', 'Value']] },
     {

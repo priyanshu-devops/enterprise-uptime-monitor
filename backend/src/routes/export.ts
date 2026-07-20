@@ -15,7 +15,7 @@ import Papa from 'papaparse';
 import PDFDocument from 'pdfkit';
 import { asyncHandler, ApiError } from '../middleware/errorHandler.js';
 import type { SheetsService } from '../services/sheets.js';
-import type { DomainRecord } from '@uptime/shared';
+import { sanitizeSheetCell, type DomainRecord } from '@uptime/shared';
 
 const querySchema = z.object({
   format: z.enum(['xlsx', 'csv', 'json', 'pdf', 'md', 'html']).optional().default('json'),
@@ -64,9 +64,13 @@ exportRouter.get(
       }
 
       case 'csv': {
+        // Neutralize formula injection: a cell exported to CSV and reopened in
+        // Excel/Sheets must never evaluate as a formula (CWE-1236). (audit C-4)
         const csv = Papa.unparse(domains.map((d) => {
           const row: Record<string, string> = {};
-          for (const col of EXPORT_COLUMNS) row[col] = d[col] as string;
+          for (const col of EXPORT_COLUMNS) {
+            row[col] = sanitizeSheetCell(String(d[col] ?? '')) as string;
+          }
           return row;
         }));
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -97,7 +101,10 @@ exportRouter.get(
 
         for (const domain of domains) {
           const row: Record<string, string> = {};
-          for (const col of EXPORT_COLUMNS) row[col] = domain[col] as string;
+          // Same formula-injection neutralization as CSV (C-4).
+          for (const col of EXPORT_COLUMNS) {
+            row[col] = sanitizeSheetCell(String(domain[col] ?? '')) as string;
+          }
           sheet.addRow(row);
         }
 

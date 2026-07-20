@@ -9,6 +9,8 @@
  *
  * Flags:
  *   --limit N                     Cap total domains (testing).
+ *   --batch-start N               1-based start index into the sheet (batch runs).
+ *   --batch-end N                 1-based inclusive end index (batch runs).
  *   --domains a.com,b.com         Only these domains.
  *   --output DIR                  Shard output dir (default monitor/output).
  *   --input DIR                   Aggregate input dir (downloaded artifacts).
@@ -19,6 +21,7 @@
  */
 import { loadConfig } from './config.js';
 import { Logger, errMessage } from './logging.js';
+import { installSignalHandlers } from './lifecycle.js';
 import {
   readDomainsFromSheet,
   selectShard,
@@ -37,6 +40,8 @@ interface Args {
   shard: number | null;
   shardCount: number;
   limit: number | null;
+  batchStart: number | null;
+  batchEnd: number | null;
   domains: string[] | null;
   output: string;
   input: string;
@@ -54,6 +59,8 @@ function parseArgs(argv: string[]): Args {
     shard: null,
     shardCount: 1,
     limit: null,
+    batchStart: null,
+    batchEnd: null,
     domains: null,
     output: 'monitor/output',
     input: 'shards',
@@ -81,6 +88,12 @@ function parseArgs(argv: string[]): Args {
         break;
       case '--limit':
         args.limit = Math.max(1, Number(next()));
+        break;
+      case '--batch-start':
+        args.batchStart = Math.max(1, Number(next()));
+        break;
+      case '--batch-end':
+        args.batchEnd = Math.max(1, Number(next()));
         break;
       case '--domains':
         args.domains = next()
@@ -115,7 +128,7 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-/** Apply --limit / --domains narrowing to a full input list. */
+/** Apply --limit / --batch-start/end / --domains narrowing to a full input list. */
 function narrow(inputs: CheckInput[], args: Args): CheckInput[] {
   let out = inputs;
   if (args.domains && args.domains.length > 0) {
@@ -128,7 +141,20 @@ function narrow(inputs: CheckInput[], args: Args): CheckInput[] {
       }
     }
   }
-  if (args.limit !== null) out = out.slice(0, args.limit);
+
+  // Batch range takes precedence over limit
+  if (args.batchStart !== null && args.batchEnd !== null) {
+    const start = args.batchStart - 1; // Convert 1-based to 0-based
+    const end = args.batchEnd;
+    out = out.slice(start, end);
+  } else if (args.batchStart !== null) {
+    // Only start specified - from start to end
+    const start = args.batchStart - 1;
+    out = out.slice(start);
+  } else if (args.limit !== null) {
+    out = out.slice(0, args.limit);
+  }
+
   return out;
 }
 
@@ -205,6 +231,7 @@ async function doAggregate(args: Args): Promise<void> {
 /** Entry point. */
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  installSignalHandlers(new Logger({ mode: 'lifecycle' }));
   if (args.plan) return doPlan(args);
   if (args.aggregate) return doAggregate(args);
   return doShard(args);

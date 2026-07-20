@@ -8,6 +8,7 @@
  */
 import { request } from 'undici';
 import type { HostingResult } from '@uptime/shared';
+import { opSignal } from './signal.js';
 
 /** Fields we request from ip-api (numeric bitmask keeps the response small). */
 const FIELDS = 'status,message,isp,org,as,country,query';
@@ -50,13 +51,17 @@ function toResult(entry: IpApiEntry): HostingResult {
  * @param ip IPv4/IPv6 address (from the DNS stage).
  * @param timeoutMs Request timeout.
  */
-export async function checkHosting(ip: string, timeoutMs = 10_000): Promise<HostingResult> {
+export async function checkHosting(
+  ip: string,
+  timeoutMs = 10_000,
+  signal?: AbortSignal,
+): Promise<HostingResult> {
   if (!ip) return { ok: false, isp: '', org: '', asn: '', country: '', error: 'No IP' };
   try {
     const res = await request(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=${FIELDS}`, {
       method: 'GET',
       headers: { 'user-agent': 'UptimeMonitor/1.0' },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: opSignal(timeoutMs, signal),
     });
     if (res.statusCode >= 400) {
       await res.body.dump().catch(() => undefined);

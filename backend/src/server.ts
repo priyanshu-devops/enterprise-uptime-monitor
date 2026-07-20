@@ -31,6 +31,11 @@ import 'node:process';
 // before the importing module's body runs.)
 import './bootstrap-env.js';
 
+// Second: validate every env var via Zod. Throws with a readable report if
+// anything is missing or malformed. Prevents booting with a weak JWT secret,
+// a stub service-account, or an unset FRONTEND_ORIGIN in production. (C-1)
+import { env, corsAllowlist, isProduction } from './config/runtime-env.js';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -51,6 +56,7 @@ import { sheetsRouter } from './routes/sheets.js';
 import { jobsRouter } from './routes/jobs.js';
 import { reportsRouter } from './routes/reports.js';
 import { logsRouter } from './routes/logs.js';
+import { publicRouter } from './routes/public.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authMiddleware } from './middleware/auth.js';
 import { cacheMiddleware } from './middleware/cache.js';
@@ -75,14 +81,40 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
-// CORS
-const frontendOrigin = process.env.FRONTEND_ORIGIN || '*';
-app.use(cors({
-  origin: frontendOrigin === '*' ? true : frontendOrigin,
-  credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+// CORS — strict allowlist. Never reflects an arbitrary Origin with credentials.
+// In production, `runtime-env.ts` refuses to boot if FRONTEND_ORIGIN is empty
+// or "*", so `corsAllowlist` is guaranteed non-empty here.       (audit item C-3)
+//
+// In dev/mock, an empty allowlist falls back to `origin: true` (reflect) but
+// with `credentials: false` — safe because there is no auth cookie/session to
+// steal, and the JWT bearer scheme is not affected by CORS credentials.
+const corsHasAllowlist = corsAllowlist.length > 0;
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Same-origin, curl, health probes: no Origin header — always allow.
+      if (!origin) return callback(null, true);
+
+      if (!corsHasAllowlist) {
+        // Dev-only convenience: reflect any origin (see credentials note below).
+        return callback(null, true);
+      }
+
+      if (corsAllowlist.includes(origin)) {
+        return callback(null, true);
+      }
+
+      logger.warn({ origin }, 'CORS rejected — origin not in allowlist');
+      return callback(new Error('Origin not allowed by CORS policy'));
+    },
+    // Credentials are only enabled when we have a concrete allowlist. In dev
+    // (no allowlist) we intentionally disable credentials to avoid the
+    // Origin-reflection + credentials footgun (CVE-class CSRF hole).
+    credentials: corsHasAllowlist,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -133,6 +165,9 @@ app.get('/api/v1/healthz', async (_req, res) => {
 // Auth routes (public)
 app.use('/api/v1/auth', authRouter);
 
+// Public status page data (no auth)
+app.use('/api/v1/public', publicRouter);
+
 // Protected routes (require JWT auth)
 app.use('/api/v1', authMiddleware);
 
@@ -149,9 +184,6 @@ app.use('/api/v1/monitoring/incidents', incidentsRouter);
 
 // Analytics
 app.use('/api/v1/analytics', analyticsRouter);
-
-// Incidents
-app.use('/api/v1/monitoring/incidents', incidentsRouter);
 
 // Audit log
 app.use('/api/v1/audit', auditRouter);
@@ -189,23 +221,69 @@ const server = app.listen(PORT, () => {
   logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'Backend API started');
 });
 
-// Graceful shutdown
-const shutdown = async (signal: string) => {
-  logger.info({ signal }, 'Shutting down...');
-  server.close(async () => {
-    await sheetsService.flush();
-    logger.info('Server closed');
-    process.exit(0);
-  });
+// Graceful shutdown — flushes cache, closes HTTP listener, then exits.
+// Exits with a non-zero code if any step throws or times out so that Render
+// treats the pod as failed and does not report false-positive successful drains.
+let shuttingDown = false;
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 
-  // Force close after 10s
-  setTimeout(() => {
-    logger.error('Forced shutdown');
+const shutdown = async (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, 'Shutting down…');
+
+  // Give in-flight requests up to SHUTDOWN_TIMEOUT_MS to complete.
+  const forceTimer = setTimeout(() => {
+    logger.error({ signal }, 'Forced shutdown after timeout');
     process.exit(1);
-  }, 10_000);
+  }, SHUTDOWN_TIMEOUT_MS);
+  // Don't let this timer keep the process alive if server.close() finishes first.
+  forceTimer.unref();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+    await sheetsService.flush();
+    clearTimeout(forceTimer);
+    logger.info('Server closed cleanly');
+    process.exit(0);
+  } catch (err) {
+    clearTimeout(forceTimer);
+    logger.error({ err }, 'Shutdown error');
+    process.exit(1);
+  }
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Global safety nets — surface these instead of dying silently.  (audit C-7/C-8)
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection');
+  // Do NOT exit here: a stray rejection in a request handler shouldn't crash
+  // the whole server. The errorHandler middleware catches request-scoped
+  // rejections; anything reaching here is a bug we want visible in logs.
+});
+
+process.on('uncaughtException', (err) => {
+  // An uncaught exception leaves the process in an unknown state; log and exit
+  // so the platform can restart us with a clean slate.
+  logger.fatal({ err }, 'Uncaught exception — exiting');
+  // Trigger a graceful shutdown attempt, but give it a much shorter window.
+  shutdown('uncaughtException').catch(() => process.exit(1));
+});
+
+// Log the resolved runtime configuration once at boot (secrets redacted).
+logger.info(
+  {
+    nodeEnv: env.NODE_ENV,
+    port: env.PORT,
+    mock: env.MOCK_DATA === '1',
+    corsAllowlistSize: corsAllowlist.length,
+    isProduction,
+  },
+  'Backend runtime configuration loaded',
+);
 
 export { app };

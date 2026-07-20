@@ -9,6 +9,7 @@
  */
 import { request } from 'undici';
 import type { HttpResult, RedirectHop } from '@uptime/shared';
+import { opSignal } from './signal.js';
 
 /** Max redirect hops to follow before giving up. */
 const MAX_REDIRECTS = 10;
@@ -94,19 +95,28 @@ function flattenHeaders(h: Record<string, string | string[] | undefined>): Recor
  * @param startUrl Fully-qualified URL to begin from (https://... preferred).
  * @param timeoutMs Per-request timeout.
  */
-export async function checkHttp(startUrl: string, timeoutMs = 10_000): Promise<HttpResult> {
-  const result = await attempt(startUrl, timeoutMs);
-  // Fall back to http:// only when https failed to connect at all.
-  if (!result.ok && startUrl.startsWith('https://') && result.status === 0) {
+export async function checkHttp(
+  startUrl: string,
+  timeoutMs = 10_000,
+  signal?: AbortSignal,
+): Promise<HttpResult> {
+  const result = await attempt(startUrl, timeoutMs, signal);
+  // Fall back to http:// only when https failed to connect at all — and the
+  // caller's budget still has room.
+  if (!result.ok && startUrl.startsWith('https://') && result.status === 0 && !signal?.aborted) {
     const httpUrl = 'http://' + startUrl.slice('https://'.length);
-    const fallback = await attempt(httpUrl, timeoutMs);
+    const fallback = await attempt(httpUrl, timeoutMs, signal);
     if (fallback.ok || fallback.status > 0) return fallback;
   }
   return result;
 }
 
 /** Single attempt (one scheme), following its redirect chain. */
-async function attempt(startUrl: string, timeoutMs: number): Promise<HttpResult> {
+async function attempt(
+  startUrl: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<HttpResult> {
   const result = baseResult();
   const chain: RedirectHop[] = [];
   let currentUrl = startUrl;
@@ -119,7 +129,7 @@ async function attempt(startUrl: string, timeoutMs: number): Promise<HttpResult>
         method: 'GET',
         headers: defaultHeaders(),
         // undici does not follow redirects by default; we follow manually.
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: opSignal(timeoutMs, signal),
         bodyTimeout: timeoutMs,
         headersTimeout: timeoutMs,
       });
