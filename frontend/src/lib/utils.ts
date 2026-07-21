@@ -5,14 +5,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function fmtNum(val: number | null | undefined): string | number {
-  if (val == null) return '-';
-  return new Intl.NumberFormat('en-US').format(val);
+export function fmtNum(val: number | string | null | undefined): string | number {
+  if (val == null || val === '') return '-';
+  const num = typeof val === 'string' ? parseFloat(val) : val;
+  if (Number.isNaN(num)) return '-';
+  return new Intl.NumberFormat('en-US').format(num);
 }
 
-export function fmtMs(ms: number | null | undefined): string {
-  if (ms == null) return '-';
-  return `${Math.round(ms)}ms`;
+export function fmtMs(ms: number | string | null | undefined): string {
+  if (ms == null || ms === '') return '-';
+  const val = typeof ms === 'string' ? parseFloat(ms) : ms;
+  if (Number.isNaN(val)) return '-';
+  return `${Math.round(val)}ms`;
 }
 
 export function fmtDuration(sec: number | null | undefined): string {
