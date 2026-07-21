@@ -36,11 +36,11 @@ export function createServices(cache: CacheService): ServiceContainer {
     });
   } else {
     // Default to Google Sheets for backward compatibility
-    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-    const serviceAccountJsonB64 = process.env.GOOGLE_SERVICE_ACCOUNT_B64;
+    const spreadsheetId = process.env.SHEET_ID;
+    const serviceAccountJsonB64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64;
     
     if (!spreadsheetId || !serviceAccountJsonB64) {
-      throw new Error('GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_B64 are required when DATABASE_PROVIDER=gsheets');
+      throw new Error('SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON_B64 are required when DATABASE_PROVIDER=gsheets');
     }
 
     provider = new GSheetsDatabaseProvider({

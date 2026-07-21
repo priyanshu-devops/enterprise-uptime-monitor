@@ -28,9 +28,11 @@ function originOf(url: string | undefined): string | undefined {
  * - frame-ancestors 'none' replaces X-Frame-Options in modern browsers
  *   (the legacy header is still sent for older ones).
  */
+const isDev = process.env.NODE_ENV !== 'production';
+
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   `connect-src 'self' ${[API_ORIGIN, PAGES_ORIGIN].filter(Boolean).join(' ')}`,
   "img-src 'self' data: https:",
@@ -40,6 +42,7 @@ const csp = [
   "form-action 'self'",
   "frame-ancestors 'none'",
 ].join('; ');
+
 
 const securityHeaders = [
   { key: 'Content-Security-Policy', value: csp },

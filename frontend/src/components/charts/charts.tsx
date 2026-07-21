@@ -30,21 +30,20 @@ export const CHART_COLORS = [
 ];
 
 const axisProps = {
-  stroke: 'hsl(var(--muted-foreground))',
-  fontSize: 11,
+  tick: { fill: 'var(--muted-foreground)', fontSize: 11 },
   tickLine: false,
   axisLine: false,
 };
 
 const tooltipStyle = {
   contentStyle: {
-    background: 'hsl(var(--popover))',
-    border: '1px solid hsl(var(--border))',
+    background: 'var(--popover)',
+    border: '1px solid var(--border)',
     borderRadius: 8,
     fontSize: 12,
-    color: 'hsl(var(--popover-foreground))',
+    color: 'var(--popover-foreground)',
   },
-  labelStyle: { color: 'hsl(var(--muted-foreground))' },
+  labelStyle: { color: 'var(--muted-foreground)' },
 };
 
 export interface SeriesPoint {
@@ -73,7 +72,7 @@ export function TrendAreaChart({
             </linearGradient>
           ))}
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="label" {...axisProps} />
         <YAxis {...axisProps} width={40} />
         <Tooltip {...tooltipStyle} />
@@ -110,7 +109,7 @@ export function TrendLineChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="label" {...axisProps} />
         <YAxis {...axisProps} width={40} />
         <Tooltip {...tooltipStyle} />
@@ -133,10 +132,10 @@ export function DistributionBarChart({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="name" {...axisProps} interval={0} angle={-20} textAnchor="end" height={60} />
         <YAxis {...axisProps} width={40} allowDecimals={false} />
-        <Tooltip {...tooltipStyle} cursor={{ fill: 'hsl(var(--accent))' }} />
+        <Tooltip {...tooltipStyle} cursor={{ fill: 'var(--accent)' }} />
         <Bar dataKey="value" fill={color} radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>

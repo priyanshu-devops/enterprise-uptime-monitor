@@ -11,7 +11,6 @@ import 'node:process';
 for (const rel of ['../.env', '../../.env']) {
   try {
     process.loadEnvFile(new URL(rel, import.meta.url));
-    break;
   } catch {
     // file absent — fall through to the next candidate / ambient env
   }
