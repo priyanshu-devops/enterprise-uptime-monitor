@@ -30,18 +30,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared packages
-        run: |
-          pnpm --filter @uptime/shared build
-          pnpm --filter @uptime/database build
-          pnpm --filter @uptime/supabase build
-          pnpm --filter @uptime/gsheets build
-
       - name: Build monitor
-        run: pnpm --filter @uptime/monitor build
+        run: pnpm run build:monitor
 
       - name: Build backend
-        run: pnpm --filter @uptime/backend build
+        run: pnpm run build:backend
 
       - name: Build frontend
         run: pnpm --filter frontend build

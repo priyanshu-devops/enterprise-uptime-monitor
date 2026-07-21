@@ -63,9 +63,7 @@ jobs:
       - name: Install and build
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @uptime/shared build
-          pnpm --filter @uptime/gsheets build
-          pnpm --filter @uptime/monitor build
+          pnpm run build:monitor
 
       - name: Compute shard matrix
         id: matrix
@@ -102,9 +100,7 @@ jobs:
       - name: Install and build
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @uptime/shared build
-          pnpm --filter @uptime/gsheets build
-          pnpm --filter @uptime/monitor build
+          pnpm run build:monitor
 
       - name: Install Playwright chromium
         if: ${{ inputs.skip_screenshots != true }}
@@ -163,9 +159,7 @@ jobs:
       - name: Install and build
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @uptime/shared build
-          pnpm --filter @uptime/gsheets build
-          pnpm --filter @uptime/monitor build
+          pnpm run build:monitor
 
       - name: Download shard artifacts
         uses: actions/download-artifact@v4

@@ -38,9 +38,7 @@ jobs:
       - name: Install and build
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @uptime/shared build
-          pnpm --filter @uptime/gsheets build
-          pnpm --filter @uptime/monitor build
+          pnpm run build:monitor
 
       - name: Checkout storage repo
         uses: actions/checkout@v4
